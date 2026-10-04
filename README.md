@@ -8,7 +8,7 @@ workout data (iPhone Shortcut) → server decides → root daemon on the Mac enf
 
 The server answers `GET /api/permission`:
 
-1. 23:00–05:00 New York → `{"allowed": false, "reason": "nightly_lockout"}`
+1. 22:00–05:00 New York → `{"allowed": false, "reason": "nightly_lockout"}`
 2. no satisfactory workout in the last 48 h, and no pass covering you → `{"allowed": false, "reason": "workout_noncompliance"}`
 3. otherwise → `{"allowed": true, "reason": null}`
 
@@ -96,7 +96,7 @@ These live in `lib/rules.js`. Only the admin key can change them: `/api/policy?k
 | setting | baseline | stricter is |
 |---|---|---|
 | `workoutWindowHours` | 48 | lower |
-| `nightStartHour` (NY) | 23 | earlier |
+| `nightStartHour` (NY) | 22 | earlier |
 | `nightEndHour` (NY) | 5 | later |
 | `dayPassesPerMonth` | 2 | lower (0 = off) |
 | `dayPassHours` | 24 | lower |
@@ -306,7 +306,7 @@ To run it again: `/api/admin?key=ADMIN_KEY&action=reset-workouts`.
 
 ## Notes
 
-- New York time: 23:00–05:00 NY is 00:00–06:00 in Campinas until Nov 1, then 01:00–07:00 (US DST ends). The zone is `TIMEZONE` in `lib/rules.js`.
+- New York time: 22:00–05:00 NY is 23:00–06:00 in Campinas until Nov 1, 2026, then 00:00–07:00 until US DST starts again (Mar 14, 2027). The zone is `TIMEZONE` in `lib/rules.js`.
 - Offline for more than 15 min logs you out (fail closed). Tune with `LEASE_MAX_SECONDS`.
 - Upstash budget: about 2 Redis commands per Mac check (once a minute), plus about 4 per scheduler run (every 5 min). That's ~130k a month against the free tier's 500k.
 - Vercel Hobby allows 12 functions per deployment. This uses 8 (one per file in `api/`).
