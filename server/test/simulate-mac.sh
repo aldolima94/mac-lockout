@@ -44,7 +44,7 @@ console() { echo "$1" > "$FAKE/console"; }
 newlog() { : > "$BASE/maclockout.log"; }
 
 # ── server ──
-( cd "$ROOT/server" && PORT=$PORT MAC_KEY=m PHONE_KEY=p ADMIN_KEY=a DEV_RECOVERY=on node test/local-server.js > "$W/server.log" 2>&1 ) &
+( cd "$ROOT/server" && PORT=$PORT MAC_KEY=m PHONE_KEY=p USER_KEY=u ADMIN_KEY=a CRON_KEY=c DEV_RECOVERY=on node test/local-server.js > "$W/server.log" 2>&1 ) &
 SPID=$!; sleep 1.5
 
 printf 'URL="%s"\nKEY="m"\n' "$URL" > "$BASE/config"
@@ -66,6 +66,15 @@ expect "YOU WOULD BE LOCKED OUT: $REASON" "dry run reports the lockout"
 grep -q 'aevtrlgo\|bootout gui' "$FAKE/calls" 2>/dev/null && bad "logout attempted in dry run" || ok "no logout attempted"
 PATH="$BIN:$PATH" MACLOCKOUT_BASE=$BASE bash "$ROOT/mac/maclockout" status | grep -q "YOU WOULD BE LOCKED OUT" \
   && ok "maclockout status shows it" || bad "maclockout status"
+
+echo "Passes show up in maclockout status"
+R=$(curl -s "$URL/api/pass?key=u&action=day&reason=testing&format=text")
+echo "$R" | grep -q "The pass will unlock in about 1 hour" && ok "day pass requested from the phone endpoint" || bad "day pass request: $R"
+sleep 4
+PATH="$BIN:$PATH" MACLOCKOUT_BASE=$BASE bash "$ROOT/mac/maclockout" status > "$W/status.txt"
+grep -q "day passes    1 of 2 left this month; requested: confirm from the email before" "$W/status.txt" \
+  && ok "maclockout status shows the pending day pass" || { bad "maclockout status passes"; cat "$W/status.txt"; }
+curl -s "$URL/api/pass?key=u&action=cancel-day" > /dev/null
 
 echo "Recovery check — dev override flips to ALLOWED, clearing it flips back"
 curl -s "$URL/api/admin?key=a&action=override&minutes=5" > /dev/null; newlog
@@ -118,6 +127,16 @@ PATH="$BIN:$PATH" MACLOCKOUT_BASE=$BASE MACLOCKOUT_TICK=1 MACLOCKOUT_POLL=2 bash
 DPID=$!
 expect "ALLOWED" "cached ALLOW honored while the lease lasts" 5
 expect "YOU WOULD BE LOCKED OUT: no_recent_allow" "lease expired → denied" 15
+
+echo "Stop signal — SIGTERM sends Healthchecks /start"
+HCPORT=$((PORT + 1)); mkdir -p "$W/hc"
+( cd "$W/hc" && python3 -m http.server "$HCPORT" > "$W/hc.log" 2>&1 ) & HCPID=$!
+sleep 1
+printf 'URL="http://127.0.0.1:1"\nKEY="m"\nHC_URL="http://127.0.0.1:%s/ping/abc"\n' "$HCPORT" > "$BASE/config"
+sleep 2; kill -TERM $DPID; sleep 2
+grep -q 'GET /ping/abc/start' "$W/hc.log" && ok "stop signal sent on SIGTERM" || bad "no stop signal"
+kill -0 $DPID 2>/dev/null && bad "daemon still running after SIGTERM" || ok "daemon exited"
+kill $HCPID 2>/dev/null
 
 echo; echo "$pass passed, $fail failed"
 [ "$fail" = 0 ]

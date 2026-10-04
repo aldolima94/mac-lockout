@@ -3,12 +3,13 @@
 //   ?action=override&minutes=60   DEV RECOVERY: answer "allowed" for N minutes (max 240), whatever the rules say
 //   ?action=clear-override        end the override now
 //   ?action=reset-workouts        forget all workouts → you're noncompliant (for re-running the test)
-//   ?action=test-email            send yourself a test email
+//   ?action=test-email            send a test email to you, and (in Portuguese) to your partner
 //
 // override and reset-workouts only work while DEV_RECOVERY=on in Vercel. Remove that
 // variable when development is over and the override stops existing.
 
-import { redis, K, hasKey, deny, logEvent, sendMail, devRecovery } from "../lib/store.js";
+import { redis, K, hasKey, deny, logEvent, mailTo, partner, devRecovery } from "../lib/store.js";
+import { testEmail } from "../lib/messages.js";
 
 export default async function handler(req, res) {
   if (!hasKey(req, "ADMIN_KEY")) return deny(res);
@@ -36,8 +37,9 @@ export default async function handler(req, res) {
       await logEvent({ type: "workouts-reset" });
       return res.status(200).json({ workoutsReset: true });
     case "test-email": {
-      const sent = await sendMail("Mac Lockout: test email", "If you're reading this, Mac Lockout can email you.");
-      return res.status(200).json({ sent });
+      const p = partner();
+      const sent = await mailTo(p.email ? "both" : "me", testEmail(p));
+      return res.status(200).json({ sent, partner: p.email || "PARTNER_EMAIL not set" });
     }
     default:
       return res.status(400).json({ error: "action must be override | clear-override | reset-workouts | test-email" });

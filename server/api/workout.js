@@ -21,18 +21,18 @@ export default async function handler(req, res) {
   const now = Date.now();
 
   const st = await loadState();
-  const before = decide({ now, policyState: st.policyState, sessions: st.sessions, override: st.override, devRecovery: devRecovery() });
+  const before = decide({ now, policyState: st.policyState, sessions: st.sessions, override: st.override, devRecovery: devRecovery(), passes: st.passes });
 
   const found = detectSessions(samples);
   const sessions = mergeSessions(st.sessions, found, now);
   await redis().set(K.sessions, sessions);
   await redis().set(K.phoneLast, now);
 
-  const after = decide({ now, policyState: st.policyState, sessions, override: st.override, devRecovery: devRecovery() });
+  const after = decide({ now, policyState: st.policyState, sessions, override: st.override, devRecovery: devRecovery(), passes: st.passes });
   await logEvent({
     type: "workout-post", samples: samples.length, sessionsFound: found,
-    compliantBefore: before.workout.compliant, compliantAfter: after.workout.compliant,
-    compliantUntil: after.workout.compliantUntil,
+    compliantBefore: before.compliance.compliant, compliantAfter: after.compliance.compliant,
+    compliantUntil: after.compliance.until, via: after.compliance.via,
   });
 
   return res.status(200).json({
@@ -40,6 +40,8 @@ export default async function handler(req, res) {
     sessionsFound: found,
     allowed: after.allowed,
     reason: after.reason,
+    compliance: after.compliance,
     workout: after.workout,
+    dayPass: after.passes.day.current?.status ?? "none",
   });
 }

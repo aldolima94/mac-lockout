@@ -1,7 +1,7 @@
 #!/bin/bash
 # install.sh — installs (or updates) the Mac Lockout daemon. From this folder:
-#   sudo ./install.sh https://YOUR-APP.vercel.app MAC_KEY    first time
-#   sudo ./install.sh                                        update scripts, keep URL/key/mode
+#   sudo ./install.sh https://YOUR-APP.vercel.app MAC_KEY HEALTHCHECK_PING_URL    first time
+#   sudo ./install.sh                                        update scripts, keep URL/keys/mode
 # A fresh install always starts in dryrun mode.
 set -eu
 
@@ -14,10 +14,10 @@ LABEL=com.randy.maclockout
 PLIST=/Library/LaunchDaemons/$LABEL.plist
 
 mkdir -p "$BASE" /usr/local/bin
-if [ $# -ge 2 ]; then
-  printf 'URL="%s"\nKEY="%s"\n' "${1%/}" "$2" > "$BASE/config"
+if [ $# -ge 3 ]; then
+  printf 'URL="%s"\nKEY="%s"\nHC_URL="%s"\n' "${1%/}" "$2" "${3%/}" > "$BASE/config"
 elif [ ! -f "$BASE/config" ]; then
-  echo "First install needs the server URL and MAC_KEY:  sudo ./install.sh https://YOUR-APP.vercel.app MAC_KEY"; exit 1
+  echo "First install needs:  sudo ./install.sh https://YOUR-APP.vercel.app MAC_KEY HEALTHCHECK_PING_URL"; exit 1
 fi
 . "$BASE/config"
 

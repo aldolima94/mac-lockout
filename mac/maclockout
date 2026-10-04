@@ -2,7 +2,7 @@
 # maclockout — look at (and, with sudo, steer) the Mac Lockout daemon.
 #
 #   maclockout                    same as status
-#   maclockout status             allowed or not, why, workout compliance (last answer, ≤60 s old)
+#   maclockout status             allowed or not, why, workout compliance, passes (last answer, ≤60 s old)
 #   sudo maclockout check         ask the server right now and print its full answer
 #   maclockout log [n]            last n daemon log lines (default 30)
 #   sudo maclockout mode          show the mode
@@ -38,13 +38,39 @@ status() {
   fi
   echo "Mode:             $(mode)"
   echo
-  echo "Workout:          $([ "$(field compliant)" = true ] && echo compliant || echo NOT compliant) (window $(field workout_window_hours) h)"
+  local via
+  case "$(field compliant_via)" in day_pass) via=" (day pass)" ;; vacation) via=" (vacation pass)" ;; *) via="" ;; esac
+  echo "Workout:          $([ "$(field compliant)" = true ] && echo "compliant$via" || echo NOT compliant) (window $(field workout_window_hours) h)"
   echo "  compliant until $(local_time "$(field compliant_until)")"
   echo "  last workout    $(local_time "$(field last_satisfactory_workout)")"
+  passes
   echo "Nightly lockout:  $([ "$(field night_active)" = true ] && echo ACTIVE || echo off) ($(field night_window))"
   [ "$(field dev_override)" = true ] && echo "DEV OVERRIDE:     on until $(local_time "$(field dev_override_until)")"
   echo
   echo "Server answer:    ${age}s ago (asks every 60s; an ALLOW is good for ${lease:-0}s)"
+}
+
+passes() {
+  [ -n "$(field day_passes_left)" ] || return 0     # older server: no passes
+  local d v
+  case "$(field day_pass)" in
+    requested) d="requested: confirm from the email before $(local_time "$(field day_pass_lapses_at)")" ;;
+    confirmed) d="confirmed: activates $(local_time "$(field day_pass_activates_at)")" ;;
+    active)    d="ACTIVE until $(local_time "$(field day_pass_ends_at)")" ;;
+    *)         d="none in progress" ;;
+  esac
+  case "$(field vacation)" in
+    scheduled) v="scheduled $(local_time "$(field vacation_start)") → $(local_time "$(field vacation_ends_at)")" ;;
+    active)    v="ACTIVE until $(local_time "$(field vacation_ends_at)")" ;;
+    waiting)   v="due, waiting for a workout (ends $(local_time "$(field vacation_ends_at)"))" ;;
+    blocked)   v="can't start (limits): cancel or move it" ;;
+    *)         v="none scheduled" ;;
+  esac
+  echo "Passes (workout rule only):"
+  echo "  day passes    $(field day_passes_left) of $(field day_passes_per_month) left this month; $d"
+  echo "  vacations     $(field vacations_left_year) of $(field vacations_per_year) left this year; $v"
+  [ -n "$(field next_pass_needs_workout_after)" ] && echo "  next pass needs a workout after $(local_time "$(field next_pass_needs_workout_after)")"
+  return 0
 }
 
 case "${1:-status}" in

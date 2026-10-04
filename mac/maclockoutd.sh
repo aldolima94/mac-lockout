@@ -16,7 +16,7 @@
 
 set -u
 BASE=${MACLOCKOUT_BASE:-/usr/local/maclockout}
-CONF=$BASE/config          # root-only: URL, KEY
+CONF=$BASE/config          # root-only: URL, KEY, HC_URL
 MODEF=$BASE/mode           # dryrun | enforce
 STATE=$BASE/state          # last server answer (world-readable, no secrets)
 LOG=$BASE/maclockout.log
@@ -110,6 +110,18 @@ log_out() {     # $1 user
   log "killed loginwindow for $u"
 }
 
+# ---- "I'm being stopped" -----------------------------------------------------
+# launchd sends SIGTERM when the daemon is unloaded (and at shutdown/restart).
+# Sleep and a closed lid do NOT stop it. We tell Healthchecks a "start" signal;
+# the server's next ping (the first check-in after the daemon is running again)
+# is the matching "success". No success within the check's grace time → alarm.
+stopping() {
+  log "STOPPING (SIGTERM) — sending stop signal"
+  [ -n "${HC_URL:-}" ] && curl -s -m 5 -o /dev/null "$HC_URL/start"
+  exit 0
+}
+trap stopping TERM INT
+
 # ---- main loop ---------------------------------------------------------------
 mkdir -p "$BASE"; touch "$LOG"; chmod 644 "$LOG"
 load_conf
@@ -160,5 +172,5 @@ while true; do
   fi
 
   prev_allowed=$ALLOWED; prev_key=$key
-  sleep "$TICK"
+  sleep "$TICK" & wait $!     # (so SIGTERM is handled right away)
 done

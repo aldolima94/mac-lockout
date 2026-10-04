@@ -3,9 +3,9 @@
 // Everything the server decides comes out of decide(), given the same inputs.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-
-export const TIMEZONE = "America/New_York";
+import { MIN, HOUR, DAY, TIMEZONE, nyClock, fmtNY, iso } from "./time.js";
+import { passSummary } from "./passes.js";
+export { MIN, HOUR, DAY, TIMEZONE, nyClock, fmtNY };
 
 // Workout rule, carried over unchanged from Workout Gate v2.
 export const RULE = {
@@ -23,6 +23,15 @@ export const BASELINE = {
   workoutWindowHours: { value: 48, stricter: "lower", min: 1 },   // max time between workouts
   nightStartHour:     { value: 23, stricter: "lower", min: 12 },  // nightly lockout starts (NY)
   nightEndHour:       { value: 5,  stricter: "higher", max: 12 }, // nightly lockout ends (NY)
+  // Passes (lib/passes.js). They only ever cover the workout rule.
+  dayPassesPerMonth:      { value: 2,  stricter: "lower",  min: 0 },    // per calendar month (NY); 0 = off
+  dayPassHours:           { value: 24, stricter: "lower",  min: 1 },    // how long a day pass covers you
+  dayPassAskMinutes:      { value: 30, stricter: "higher", max: 720 },  // request → "are you sure?" email
+  dayPassActivateMinutes: { value: 30, stricter: "higher", max: 720 },  // confirm → active
+  vacationDays:           { value: 5,  stricter: "lower",  min: 1 },    // how long a vacation covers you
+  vacationsPerYear:       { value: 4,  stricter: "lower",  min: 0 },    // per calendar year (NY); 0 = off
+  vacationGapDays:        { value: 90, stricter: "higher", max: 365 },  // at most one vacation per rolling N days
+  vacationNoticeHours:    { value: 24, stricter: "higher", max: 720 },  // schedule at least this far ahead
 };
 export const LOOSEN_DELAY_HOURS = 72;
 
@@ -36,20 +45,6 @@ export const IN_USE_REPEAT_MINUTES = 30; // …and again every 30 minutes while 
 export const IN_USE_GAP_MINUTES = 15; // reports further apart than this start a new episode
 
 // ── time ─────────────────────────────────────────────────────────────────────
-
-export function nyClock(ts) {
-  const p = new Intl.DateTimeFormat("en-US", {
-    timeZone: TIMEZONE, hourCycle: "h23",
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-  }).formatToParts(new Date(ts));
-  const g = t => Number(p.find(x => x.type === t).value);
-  return { h: g("hour"), m: g("minute"), s: g("second") };
-}
-
-export const fmtNY = ts => new Date(ts).toLocaleString("en-US", {
-  timeZone: TIMEZONE, weekday: "short", month: "short", day: "numeric",
-  hour: "numeric", minute: "2-digit",
-}) + " NY";
 
 // Is the nightly lockout active at `now`? Window always crosses midnight.
 export function nightly(now, policy) {
@@ -140,7 +135,10 @@ export function compliance(now, sessions, windowHours) {
     lastAnyWorkout: iso(anyEnds.length ? Math.max(...anyEnds) : null),
   };
 }
-const iso = t => (t === null || t === undefined ? null : new Date(t).toISOString());
+
+// End times of satisfactory workouts that have finished by `now`.
+export const satisfactoryEnds = (sessions, now) =>
+  (sessions || []).filter(s => isSatisfactory(s) && Date.parse(s.end) <= now).map(s => Date.parse(s.end));
 
 // ── policy: baseline + active values + delayed loosening ─────────────────────
 // Stored state: { values: { key: n }, pending: { key: { value, requestedAt, effectiveAt } } }
@@ -191,15 +189,25 @@ export function applyChange(state, key, value, now) {
 
 // ── the decision ─────────────────────────────────────────────────────────────
 
-// inputs: { now, policyState, sessions, override, devRecovery }
-export function decide({ now, policyState, sessions, override, devRecovery }) {
+// inputs: { now, policyState, sessions, override, devRecovery, passes }
+export function decide({ now, policyState, sessions, override, devRecovery, passes }) {
   const policy = effectivePolicy(policyState, now);
   const night = nightly(now, policy);
-  const workout = compliance(now, sessions || [], policy.workoutWindowHours);
+  const workout = compliance(now, sessions || [], policy.workoutWindowHours);   // real workouts only
+  const pass = passSummary(passes || [], { now, policy, workoutEnds: satisfactoryEnds(sessions, now) });
+
+  // Workout rule, overall: a real workout OR a pass covering you.
+  const wUntil = workout.compliantUntil ? Date.parse(workout.compliantUntil) : null;
+  const cover = pass.cover;
+  const compliant = workout.compliant || Boolean(cover);
+  const untilMs = compliant
+    ? Math.max(workout.compliant ? wUntil : 0, cover ? cover.until : 0)
+    : (wUntil === null && pass.lastCoverEnd === null ? null : Math.max(wUntil ?? 0, pass.lastCoverEnd ?? 0));
+  const via = workout.compliant ? "workout" : cover ? cover.kind : null;
 
   let allowed = true, reason = null;
   if (night.active) { allowed = false; reason = "nightly_lockout"; }
-  else if (!workout.compliant) { allowed = false; reason = "workout_noncompliance"; }
+  else if (!compliant) { allowed = false; reason = "workout_noncompliance"; }
 
   // Development recovery only: honored while DEV_RECOVERY=on on the server.
   const overrideActive = Boolean(devRecovery && override && override.until > now);
@@ -213,7 +221,7 @@ export function decide({ now, policyState, sessions, override, devRecovery }) {
     if (overrideActive) limits.push(Math.floor((override.until - now) / 1000));
     else {
       limits.push(night.secondsUntilStart);
-      limits.push(Math.floor((Date.parse(workout.compliantUntil) - now) / 1000));
+      limits.push(Math.floor((untilMs - now) / 1000));
     }
     leaseSeconds = Math.max(0, Math.min(...limits));
   }
@@ -224,7 +232,9 @@ export function decide({ now, policyState, sessions, override, devRecovery }) {
     now: new Date(now).toISOString(),
     leaseSeconds,
     nightly: night,
-    workout,
+    compliance: { compliant, until: iso(untilMs), via },   // the workout rule, passes included
+    workout,                                               // real workouts only
+    passes: pass,                                          // raw (ms) — see summaryForApi
     policy,
     pendingLoosening: Object.fromEntries(
       Object.entries(policyState?.pending || {}).filter(([, p]) => p.effectiveAt > now)
@@ -236,7 +246,8 @@ export function decide({ now, policyState, sessions, override, devRecovery }) {
 }
 
 // ── email safeguard: track "someone at the screen while denied" ──────────────
-// state: { since, lastSeen, lastEmailAt } | null.  Returns { state, sendAlert }.
+// state: { since, lastSeen, lastEmailAt, emails } | null.  Returns { state, sendAlert, to }.
+// The first email of an episode goes to you only; later ones to you and your partner.
 export function trackInUse(prev, { now, allowed, userPresent }) {
   if (allowed || !userPresent) {
     // An allow ends the episode. A report with nobody at the screen just doesn't extend it.
@@ -249,6 +260,6 @@ export function trackInUse(prev, { now, allowed, userPresent }) {
   const sendAlert = st.lastEmailAt
     ? now - st.lastEmailAt >= IN_USE_REPEAT_MINUTES * MIN
     : now - st.since >= IN_USE_ALERT_MINUTES * MIN;
-  if (sendAlert) st.lastEmailAt = now;
-  return { state: st, sendAlert };
+  if (sendAlert) { st.lastEmailAt = now; st.emails = (st.emails || 0) + 1; }
+  return { state: st, sendAlert, to: (st.emails || 0) > 1 ? "both" : "me" };
 }

@@ -1,7 +1,7 @@
-// /api/policy — view or change the restrictions. Key: ADMIN_KEY.
+// /api/policy — view (USER_KEY or ADMIN_KEY) or change (ADMIN_KEY only) the restrictions.
 //
 //   GET  /api/policy                                   current values, baselines, pending loosenings
-//   GET  /api/policy?set=workoutWindowHours&value=36   (or POST {set, value})
+//   GET  /api/policy?set=workoutWindowHours&value=36   (or POST {set, value}) — ADMIN_KEY
 //
 // Stricter → immediate. Looser (toward the baseline) → takes effect after 72 h.
 // Past the baseline → refused.
@@ -10,13 +10,14 @@ import { BASELINE, LOOSEN_DELAY_HOURS, effectivePolicy, applyChange } from "../l
 import { redis, K, hasKey, deny, readBody, logEvent } from "../lib/store.js";
 
 export default async function handler(req, res) {
-  if (!hasKey(req, "ADMIN_KEY")) return deny(res);
+  if (!hasKey(req, "USER_KEY", "ADMIN_KEY")) return deny(res);
   res.setHeader("Cache-Control", "no-store");
   const now = Date.now();
   const state = await redis().get(K.policy);
   const input = req.method === "POST" ? readBody(req) : req.query;
 
   if (input.set) {
+    if (!hasKey(req, "ADMIN_KEY")) return res.status(403).json({ error: "only the admin key (your partner) can change the rules" });
     const value = Number(input.value);
     const r = applyChange(state, String(input.set), value, now);
     if (r.error) {
