@@ -1,0 +1,65 @@
+#!/bin/bash
+# maclockout — look at (and, with sudo, steer) the Mac Lockout daemon.
+#
+#   maclockout                    same as status
+#   maclockout status             allowed or not, why, workout compliance (last answer, ≤60 s old)
+#   sudo maclockout check         ask the server right now and print its full answer
+#   maclockout log [n]            last n daemon log lines (default 30)
+#   sudo maclockout mode          show the mode
+#   sudo maclockout mode dryrun   report only: "YOU WOULD BE LOCKED OUT: …"
+#   sudo maclockout mode enforce  log out while denied
+
+set -u
+BASE=${MACLOCKOUT_BASE:-/usr/local/maclockout}
+STATE=$BASE/state; LOG=$BASE/maclockout.log; MODEF=$BASE/mode; CONF=$BASE/config
+
+field() { sed -n "s/^$1=//p" "$STATE" 2>/dev/null | head -n 1; }
+need_root() { [ "$(id -u)" -eq 0 ] || { echo "run with sudo: sudo maclockout $*"; exit 1; }; }
+mode() { m=$(cat "$MODEF" 2>/dev/null | tr -d '[:space:]'); [ "$m" = enforce ] && echo enforce || echo dryrun; }
+# ISO UTC from the server → this Mac's local time.
+local_time() {
+  local e
+  [ -n "$1" ] || { echo none; return; }
+  e=$(TZ=UTC date -j -f '%Y-%m-%dT%H:%M:%S' "${1%%.*}" +%s 2>/dev/null) && date -r "$e" '+%a %b %d, %H:%M (local)' || echo "$1"
+}
+
+status() {
+  if [ ! -f "$STATE" ]; then echo "No answer from the server yet. Check: maclockout log"; exit 1; fi
+  local now received lease age allowed reason verdict
+  now=$(date +%s); received=$(field received_at); lease=$(field lease_seconds)
+  allowed=$(field allowed); reason=$(field reason); age=$((now - ${received:-0}))
+  if [ "$allowed" = true ] && [ "$age" -ge 0 ] && [ "$age" -lt "${lease:-0}" ]; then verdict="ALLOWED"
+  elif [ "$allowed" = true ]; then verdict="DENIED: no_recent_allow (last ALLOW has expired)"
+  else verdict="DENIED: $reason"; fi
+
+  echo "Mac use:          $verdict"
+  if [ "${verdict%%:*}" = DENIED ]; then
+    [ "$(mode)" = dryrun ] && echo "                  YOU WOULD BE LOCKED OUT (dry run)" || echo "                  enforcing: logged out while this lasts"
+  fi
+  echo "Mode:             $(mode)"
+  echo
+  echo "Workout:          $([ "$(field compliant)" = true ] && echo compliant || echo NOT compliant) (window $(field workout_window_hours) h)"
+  echo "  compliant until $(local_time "$(field compliant_until)")"
+  echo "  last workout    $(local_time "$(field last_satisfactory_workout)")"
+  echo "Nightly lockout:  $([ "$(field night_active)" = true ] && echo ACTIVE || echo off) ($(field night_window))"
+  [ "$(field dev_override)" = true ] && echo "DEV OVERRIDE:     on until $(local_time "$(field dev_override_until)")"
+  echo
+  echo "Server answer:    ${age}s ago (asks every 60s; an ALLOW is good for ${lease:-0}s)"
+}
+
+case "${1:-status}" in
+  status) status ;;
+  check)
+    need_root check
+    . "$CONF"
+    curl -s -m 10 -H "Authorization: Bearer $KEY" "$URL/api/permission"; echo ;;
+  log) tail -n "${2:-30}" "$LOG" ;;
+  mode)
+    if [ -z "${2:-}" ]; then echo "$(mode)"; exit 0; fi
+    need_root mode "$2"
+    case "$2" in
+      dryrun|enforce) echo "$2" > "$MODEF"; chmod 644 "$MODEF"; echo "mode → $2 (takes effect within 5 seconds)" ;;
+      *) echo "mode must be dryrun or enforce"; exit 1 ;;
+    esac ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac
