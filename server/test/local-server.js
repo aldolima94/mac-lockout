@@ -12,7 +12,7 @@ process.env.GMAIL_USER ||= "test@example.com";
 process.env.GMAIL_APP_PASSWORD ||= "x";
 
 const routes = {};
-for (const name of ["permission", "workout", "policy", "admin", "events", "pass", "confirm", "tick"]) {
+for (const name of ["permission", "workout", "brush", "policy", "admin", "events", "pass", "confirm", "tick"]) {
   routes[`/api/${name}`] = (await import(`../api/${name}.js`)).default;
 }
 

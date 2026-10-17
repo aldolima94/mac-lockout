@@ -175,7 +175,7 @@ test("vacation: 24 h notice, 5 days of workout compliance, nights still locked",
   assert.equal(D(mid, OLD, v.passes).compliance.via, "vacation");
   assert.equal(D(ny("2026-10-12 23:30"), OLD, v.passes).reason, "nightly_lockout");
   assert.equal(D(ny("2026-10-15 06:00"), OLD, v.passes).reason, "workout_noncompliance");
-  assert.equal(D(ny("2026-10-14 23:00") - MIN, OLD, v.passes).allowed, true);
+  assert.equal(D(ny("2026-10-14 21:00") - MIN, OLD, v.passes).allowed, true);   // 21:59 São Paulo, last minute before the lockout
 });
 
 test("vacation: move or cancel before it starts; started ones count", () => {

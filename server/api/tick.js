@@ -45,7 +45,7 @@ export default async function handler(req, res) {
       return { ...st, passes: s.passes };
     });
 
-    const d = decide({ now, policyState: st.policyState, sessions: st.sessions, override: st.override, devRecovery: devRecovery(), passes: st.passes });
+    const d = decide({ now, policyState: st.policyState, sessions: st.sessions, override: st.override, devRecovery: devRecovery(), passes: st.passes, brushes: st.brushes, usage: st.usage });
     const ctx = { now, policy: d.policy, workoutEnds: satisfactoryEnds(st.sessions, now) };
 
     // 2. escalation

@@ -44,6 +44,7 @@ status() {
   echo "  compliant until $(local_time "$(field compliant_until)")"
   echo "  last workout    $(local_time "$(field last_satisfactory_workout)")"
   passes
+  sunday
   echo "Nightly lockout:  $([ "$(field night_active)" = true ] && echo ACTIVE || echo off) ($(field night_window))"
   [ "$(field dev_override)" = true ] && echo "DEV OVERRIDE:     on until $(local_time "$(field dev_override_until)")"
   echo
@@ -71,6 +72,17 @@ passes() {
   echo "  vacations     $(field vacations_left_year) of $(field vacations_per_year) left this year; $v"
   [ -n "$(field next_pass_needs_workout_after)" ] && echo "  next pass needs a workout after $(local_time "$(field next_pass_needs_workout_after)")"
   return 0
+}
+
+hm() { local m=${1:-0}; isnum "$m" || m=0; if [ $((m / 60)) -gt 0 ] && [ $((m % 60)) -gt 0 ]; then echo "$((m / 60))h $((m % 60))m"; elif [ $((m / 60)) -gt 0 ]; then echo "$((m / 60))h"; else echo "${m}m"; fi; }
+isnum() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
+
+sunday() {
+  [ -n "$(field sunday)" ] || return 0              # older server: no Sunday bank
+  if [ "$(field sunday_limited)" != true ]; then echo "Sunday time:      no limit this Sunday ($(field sunday))"
+  elif [ "$(field sunday_today)" = true ]; then
+    echo "Sunday time:      $(hm "$(field sunday_left_minutes)") left today (used $(hm "$(field sunday_used_minutes)") of $(hm "$(field sunday_total_minutes)"))"
+  else echo "Sunday time:      $(hm "$(field sunday_total_minutes)") banked for Sunday $(field sunday)"; fi
 }
 
 case "${1:-status}" in

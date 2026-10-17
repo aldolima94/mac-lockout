@@ -3,14 +3,15 @@
 One question: **is Randy permitted to use the MacBook right now?**
 
 ```
-workout data (iPhone Shortcut) → server decides → root daemon on the Mac enforces
+workout + brushing data (iPhone Shortcuts) → server decides → root daemon on the Mac enforces
 ```
 
 The server answers `GET /api/permission`:
 
-1. 22:00–05:00 New York → `{"allowed": false, "reason": "nightly_lockout"}`
+1. 22:00–06:00 São Paulo → `{"allowed": false, "reason": "nightly_lockout"}`
 2. no satisfactory workout in the last 48 h, and no pass covering you → `{"allowed": false, "reason": "workout_noncompliance"}`
-3. otherwise → `{"allowed": true, "reason": null}`
+3. a Sunday, and that Sunday's MacBook time is used up → `{"allowed": false, "reason": "sunday_time_used"}`
+4. otherwise → `{"allowed": true, "reason": null}`
 
 A satisfactory workout is one session of ≥20 min with ≥5 min above 120 bpm. The rule is unchanged from Workout Gate v2.
 
@@ -19,6 +20,25 @@ The Mac daemon asks the server every 60 s. While the answer is no, whoever is lo
 **Email safeguard.** If the Mac keeps reporting someone logged in while the answer is no, for more than 5 minutes, the server emails you, and again every 30 minutes while it continues.
 
 **Stop alarm.** When the daemon is stopped (unloaded, or the Mac shuts down), it sends Healthchecks a "start" signal. The next time the daemon checks in, the server sends "success". If no success arrives within the check's grace time, Healthchecks alerts you. Sleep and a closed lid don't stop the daemon, so they never trigger it. A normal restart comes back in minutes. A shutdown that stays off longer than the grace time does trigger it, except during a vacation pass (see below).
+
+## Sunday time
+
+Monday to Saturday have no time limit. **Sundays** (São Paulo) are a budget: **4 h** of MacBook time, plus what you earned that week (Monday–Sunday):
+
+| you do | Sunday time |
+|---|---|
+| brush your teeth ≥ 2 min (from Apple Health) | +30 min a session, at most 2 a day (+1 h) |
+| a qualifying workout 2 days in a row | +1 h for the 2nd day, +1 h for each further day in a row |
+| nobody at the Mac 21:00–22:00 (Monday–Saturday nights) | +1 h a night |
+
+- Only real use counts: minutes the Mac is awake with you logged in, whenever they happen. Opening it at noon with 7 h banked gets you all 7 h (the 22:00 lockout still applies). Closing the lid stops the clock.
+- When it runs out you're logged out like any other lockout (60 s to save), with reason `sunday_time_used`.
+- Streaks count from Monday. Anything earned on Sunday itself (a morning brush, a workout) counts that Sunday.
+- Unused time is gone when the week ends. Every week starts at 4 h.
+- The first limited Sunday is **Oct 25, 2026** (`SUNDAY_BANK_FIRST` in `lib/sunday.js`). Sundays before it have no limit.
+- Example: brushing twice a day plus 3 early nights, no streaks → 4 h + 7 h + 3 h = **14 h**.
+- The phone status (`/api/pass?format=text`), the brushing Shortcut and `maclockout` show it, e.g. `Sunday time banked for Sun, Oct 25: 7h 30m`.
+- Rates and the start date are at the top of `lib/sunday.js`. The 4 h base is the `sundayBaseHours` setting: your partner can lower it at once; raising it back waits 72 h and can't go past 4 h.
 
 ## Passes
 
@@ -66,12 +86,14 @@ The clock runs from when compliance ran out and never resets. The **first** day-
 server/            Vercel project (root directory = server)
   lib/rules.js       the rules and ALL baselines. Pure functions; decide() is the whole decision.
   lib/passes.js      day + vacation passes (pure)
+  lib/sunday.js      the Sunday bank: what you earned, what you've used (pure)
   lib/escalation.js  partner escalation + the vacation shutdown-alarm logic (pure, timings at the top)
-  lib/time.js        New York time helpers
+  lib/time.js        New York and São Paulo time helpers
   lib/messages.js    email texts (yours in English, your partner's in Portuguese)
   lib/store.js       Redis keys, auth, event log, email
   api/permission     the Mac asks here (MAC_KEY); you can look too (USER_KEY / ADMIN_KEY)
   api/workout        the iPhone Shortcut posts heart-rate readings here (PHONE_KEY)
+  api/brush          the iPhone Shortcut posts toothbrushing sessions here (PHONE_KEY)
   api/pass           your passes, from the phone (USER_KEY)
   api/confirm        the "are you sure?" link from the email (the link's token is the key)
   api/tick           the scheduler, every 5 min (CRON_KEY)
@@ -96,8 +118,9 @@ These live in `lib/rules.js`. Only the admin key can change them: `/api/policy?k
 | setting | baseline | stricter is |
 |---|---|---|
 | `workoutWindowHours` | 48 | lower |
-| `nightStartHour` (NY) | 22 | earlier |
-| `nightEndHour` (NY) | 5 | later |
+| `nightStartHourSP` (São Paulo) | 22 | earlier |
+| `nightEndHourSP` (São Paulo) | 6 | later |
+| `sundayBaseHours` | 4 | lower |
 | `dayPassesPerMonth` | 2 | lower (0 = off) |
 | `dayPassHours` | 24 | lower |
 | `dayPassAskMinutes` (request → "are you sure?") | 30 | higher |
@@ -207,6 +230,35 @@ The vacation starts at midnight New York time that day (01:00/02:00 in Campinas)
 
 `maclockout status` on the Mac shows the same passes section.
 
+The status (no `action`) ends with your Sunday time, e.g.:
+
+```
+Sunday time banked for Sun, Oct 25: 7h 30m
+  4h base + 3h 30m brushing + 0m streaks + 0m early nights
+```
+
+### 4b. Brushing Shortcut
+
+Brushing reaches the server from Apple Health. Whatever logs your brushing into Health (the toothbrush's app, or you in the Health app) works.
+
+**Shortcut "Brushing":**
+
+1. **Find Health Samples** where **Type** is **Toothbrushing** and **Start Date** is in the last **3 days**.
+2. **Repeat with Each** (the Health samples):
+   - **Format Date** *Start Date* → **ISO 8601**, *Include ISO 8601 Time* on
+   - **Format Date** *End Date* → **ISO 8601**, *Include ISO 8601 Time* on
+   - **Text**: *Formatted Date (start)*`,`*Formatted Date (end)*
+3. **Combine Text** (*Repeat Results*) with **New Lines**.
+4. **Get Contents of URL**:
+   - URL `https://APP.vercel.app/api/brush`, Method **POST**
+   - Headers: `Authorization` = `Bearer PHONE_KEY`
+   - Request Body **JSON**: `brushes_csv` = *Combined Text*, `format` = `text`
+5. **Show Result**.
+
+It answers e.g. `Got 2 brushing sessions (2 of 2+ min).` followed by your Sunday time. Re-sending the same days is harmless. Make it run by itself: **Automation → Time of Day**, e.g. 09:00 and 21:30 daily, **Run Immediately**. A brush only counts once the Shortcut has sent it, so a Sunday-morning brush needs a run before it shows up.
+
+Test without a toothbrush: `curl -X POST "https://APP.vercel.app/api/brush?format=text" -H "Authorization: Bearer PHONE_KEY" -H "Content-Type: application/json" -d '{"brushes_csv":"2026-10-19T08:00:00-03:00,2026-10-19T08:02:10-03:00"}'`
+
 ### 5. Mac
 
 ```
@@ -218,7 +270,7 @@ sudo ./install.sh https://APP.vercel.app MAC_KEY HEALTHCHECK_PING_URL
 It always installs in **dryrun** mode.
 
 ```
-maclockout                  # status: allowed?, reason, compliant until (and via what), last workout, passes
+maclockout                  # status: allowed?, reason, compliant until (and via what), last workout, passes, Sunday time
 maclockout log              # what the daemon did
 sudo maclockout check       # ask the server right now, full answer
 sudo maclockout mode enforce|dryrun
@@ -304,12 +356,26 @@ To run it again: `/api/admin?key=ADMIN_KEY&action=reset-workouts`.
 - Run the **Vacation** Shortcut with a date at least 2 days out. `maclockout` shows `scheduled …`. Then cancel it: `/api/pass?key=USER_KEY&action=cancel-vacation&format=text`.
 - Do a workout to get back in compliance.
 
+## Shipping the Sunday bank (and the 22:00 São Paulo lockout)
+
+Nothing changes until this is merged into `main`. No new environment variables, no Mac reinstall, and the existing Shortcuts keep working.
+
+1. **Merge** into `main` (your partner, on GitHub). Vercel deploys in about a minute.
+2. **From that moment** the lockout is 22:00–06:00 São Paulo. Merged after 22:00 → the Mac logs you out within a minute or two.
+3. **Check** from the phone:
+   - `/api/permission?key=USER_KEY` → `nightly.window` is `22:00–06:00 America/Sao_Paulo`.
+   - `/api/pass?key=USER_KEY&format=text` ends with `Sunday time: no limit this Sunday …`. From Monday it shows what's banked for Oct 25.
+4. **Build the Brushing Shortcut** (4b) and run it once.
+5. *Optional:* the Sunday line in `maclockout`: `sudo install -m 755 -o root -g wheel mac/maclockout /usr/local/bin/maclockout`. This only replaces the status command. The daemon keeps running.
+
+**Undo:** Vercel → Deployments → the previous one → **Instant Rollback**. The old code ignores the new data (`ml:brushes`, `ml:usage`). Merging a revert later does the same for good.
+
 ## Notes
 
-- New York time: 22:00–05:00 NY is 23:00–06:00 in Campinas until Nov 1, 2026, then 00:00–07:00 until US DST starts again (Mar 14, 2027). The zone is `TIMEZONE` in `lib/rules.js`.
+- Time zones: the nightly lockout and the Sunday bank run on São Paulo time, which has no daylight saving time, so 22:00 is always 22:00 in Campinas. Passes, months and your emails still use New York time (`TIMEZONE` in `lib/time.js`).
 - Offline for more than 15 min logs you out (fail closed). Tune with `LEASE_MAX_SECONDS`.
-- Upstash budget: about 2 Redis commands per Mac check (once a minute), plus about 4 per scheduler run (every 5 min). That's ~130k a month against the free tier's 500k.
-- Vercel Hobby allows 12 functions per deployment. This uses 8 (one per file in `api/`).
+- Upstash budget: about 2 Redis commands per Mac check (once a minute), plus about 4 per scheduler run (every 5 min), plus one per minute of use on Sundays. That's ~140k a month against the free tier's 500k.
+- Vercel Hobby allows 12 functions per deployment. This uses 9 (one per file in `api/`).
 - Everything is free: Vercel Hobby, Upstash free, cron-job.org, Healthchecks Hobbyist (2 of 20 checks), and Gmail.
 - HealthKit on the Mac: macOS still has no Health app or Health data store. A native Mac HealthKit reader would also need a paid developer account. The iPhone Shortcut stays the workout pathway.
 
