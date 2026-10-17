@@ -5,6 +5,7 @@
 // ?now=<ISO time> pretends it's another time (ADMIN_KEY + DEV_RECOVERY=on only; nothing is recorded).
 
 import { decide, trackInUse } from "../lib/rules.js";
+import { trackUsage } from "../lib/sunday.js";
 import { summaryForApi } from "../lib/passes.js";
 import { inUse as inUseMail } from "../lib/messages.js";
 import { iso } from "../lib/time.js";
@@ -22,12 +23,23 @@ export default async function handler(req, res) {
   }
 
   const st = await loadState();
-  const d = decide({ now, policyState: st.policyState, sessions: st.sessions, override: st.override, devRecovery: devRecovery(), passes: st.passes });
+  const inputs = { now, policyState: st.policyState, sessions: st.sessions, override: st.override, devRecovery: devRecovery(), passes: st.passes, brushes: st.brushes, usage: st.usage };
+  let d = decide(inputs);
 
   if (isMac) {
     const userPresent = req.query.user_present === "1";
     const mode = req.query.mode === "enforce" ? "enforce" : "dryrun";
     await redis().set(K.macLast, { at: now, userPresent, mode });
+
+    // Sunday bank: count time at the screen on a limited Sunday, and note late nights.
+    const usage = trackUsage(st.usage, {
+      now, userPresent, last: st.macLast, policy: d.policy,
+      counting: d.allowed && d.sunday.limited && d.sunday.isSunday,
+    });
+    if (JSON.stringify(usage) !== JSON.stringify(st.usage ?? { sundays: {}, lateNights: [] })) {
+      await redis().set(K.usage, usage);
+      d = decide({ ...inputs, usage });
+    }
 
     // Dead man's switch: every Mac check-in pings Healthchecks.io ("success").
     // The daemon itself sends "start" when it's stopped (see mac/maclockoutd.sh).
@@ -97,6 +109,12 @@ function toText(d) {
     ["vacation_start", vac.current?.startAt ?? vac.current?.start],
     ["vacation_ends_at", vac.current?.endsAt],
     ["next_pass_needs_workout_after", d.passes.nextPassNeedsWorkoutAfter],
+    ["sunday", d.sunday.sunday],
+    ["sunday_limited", d.sunday.limited],
+    ["sunday_today", d.sunday.isSunday],
+    ["sunday_total_minutes", d.sunday.totalMin],
+    ["sunday_used_minutes", d.sunday.usedMin],
+    ["sunday_left_minutes", d.sunday.leftMin],
     ["dev_override", d.devOverride.active],
     ["dev_override_until", d.devOverride.until],
   ].map(([k, x]) => `${k}=${v(x)}`).join("\n") + "\n";

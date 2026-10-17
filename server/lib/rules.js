@@ -3,8 +3,9 @@
 // Everything the server decides comes out of decide(), given the same inputs.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { MIN, HOUR, DAY, TIMEZONE, nyClock, fmtNY, iso } from "./time.js";
+import { MIN, HOUR, DAY, TIMEZONE, SP_TZ, nyClock, spClock, fmtNY, iso } from "./time.js";
 import { passSummary } from "./passes.js";
+import { sundayBank } from "./sunday.js";
 export { MIN, HOUR, DAY, TIMEZONE, nyClock, fmtNY };
 
 // Workout rule, carried over unchanged from Workout Gate v2.
@@ -21,8 +22,9 @@ export const RULE = {
 // baseline is refused.
 export const BASELINE = {
   workoutWindowHours: { value: 48, stricter: "lower", min: 1 },   // max time between workouts
-  nightStartHour:     { value: 23, stricter: "lower", min: 12 },  // nightly lockout starts (NY)
-  nightEndHour:       { value: 5,  stricter: "higher", max: 12 }, // nightly lockout ends (NY)
+  nightStartHourSP:   { value: 22, stricter: "lower", min: 12 },  // nightly lockout starts (São Paulo)
+  nightEndHourSP:     { value: 6,  stricter: "higher", max: 12 }, // nightly lockout ends (São Paulo)
+  sundayBaseHours:    { value: 4,  stricter: "lower", min: 0 },   // Sunday MacBook time before anything earned (lib/sunday.js)
   // Passes (lib/passes.js). They only ever cover the workout rule.
   dayPassesPerMonth:      { value: 2,  stricter: "lower",  min: 0 },    // per calendar month (NY); 0 = off
   dayPassHours:           { value: 24, stricter: "lower",  min: 1 },    // how long a day pass covers you
@@ -46,18 +48,17 @@ export const IN_USE_GAP_MINUTES = 15; // reports further apart than this start a
 
 // ── time ─────────────────────────────────────────────────────────────────────
 
-// Is the nightly lockout active at `now`? Window always crosses midnight.
+// Is the nightly lockout active at `now`? São Paulo time. Window always crosses midnight.
 export function nightly(now, policy) {
-  const { h, m, s } = nyClock(now);
-  const start = policy.nightStartHour, end = policy.nightEndHour;
+  const { h, m, s } = spClock(now);
+  const start = policy.nightStartHourSP, end = policy.nightEndHourSP;
   const active = h >= start || h < end;
   const secOfDay = h * 3600 + m * 60 + s;
   const until = target => ((target * 3600 - secOfDay) % 86400 + 86400) % 86400;
   return {
     active,
-    window: `${pad(start)}:00–${pad(end)}:00 ${TIMEZONE}`,
-    // Approximate across a DST change; only used for diagnostics and the lease
-    // (the lease is only issued in daytime, when no DST change can happen).
+    window: `${pad(start)}:00–${pad(end)}:00 ${SP_TZ}`,
+    // São Paulo has no daylight saving time, so this is exact.
     secondsUntilStart: active ? 0 : until(start),
     secondsUntilEnd: active ? until(end) : 0,
   };
@@ -189,12 +190,14 @@ export function applyChange(state, key, value, now) {
 
 // ── the decision ─────────────────────────────────────────────────────────────
 
-// inputs: { now, policyState, sessions, override, devRecovery, passes }
-export function decide({ now, policyState, sessions, override, devRecovery, passes }) {
+// inputs: { now, policyState, sessions, override, devRecovery, passes, brushes, usage }
+export function decide({ now, policyState, sessions, override, devRecovery, passes, brushes, usage }) {
   const policy = effectivePolicy(policyState, now);
   const night = nightly(now, policy);
   const workout = compliance(now, sessions || [], policy.workoutWindowHours);   // real workouts only
-  const pass = passSummary(passes || [], { now, policy, workoutEnds: satisfactoryEnds(sessions, now) });
+  const workoutEnds = satisfactoryEnds(sessions, now);
+  const pass = passSummary(passes || [], { now, policy, workoutEnds });
+  const sunday = sundayBank({ now, policy, workoutEnds, brushes, usage });
 
   // Workout rule, overall: a real workout OR a pass covering you.
   const wUntil = workout.compliantUntil ? Date.parse(workout.compliantUntil) : null;
@@ -208,6 +211,7 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
   let allowed = true, reason = null;
   if (night.active) { allowed = false; reason = "nightly_lockout"; }
   else if (!compliant) { allowed = false; reason = "workout_noncompliance"; }
+  else if (sunday.exhausted) { allowed = false; reason = "sunday_time_used"; }
 
   // Development recovery only: honored while DEV_RECOVERY=on on the server.
   const overrideActive = Boolean(devRecovery && override && override.until > now);
@@ -222,6 +226,7 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
     else {
       limits.push(night.secondsUntilStart);
       limits.push(Math.floor((untilMs - now) / 1000));
+      if (sunday.secondsLeft !== null) limits.push(sunday.secondsLeft);
     }
     leaseSeconds = Math.max(0, Math.min(...limits));
   }
@@ -235,6 +240,7 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
     compliance: { compliant, until: iso(untilMs), via },   // the workout rule, passes included
     workout,                                               // real workouts only
     passes: pass,                                          // raw (ms) — see summaryForApi
+    sunday,                                                // the Sunday bank (lib/sunday.js)
     policy,
     pendingLoosening: Object.fromEntries(
       Object.entries(policyState?.pending || {}).filter(([, p]) => p.effectiveAt > now)

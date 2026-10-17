@@ -7,6 +7,8 @@ import {
 
 // Oct 5 2026: New York is on EDT (UTC-4).
 const ny = (hhmm, day = "2026-10-05") => Date.parse(`${day}T${hhmm}:00-04:00`);
+// São Paulo is UTC-3 all year (no daylight saving time).
+const sp = (hhmm, day = "2026-10-05") => Date.parse(`${day}T${hhmm}:00-03:00`);
 const base = effectivePolicy(null, 0);
 
 function samples(endTs, minutes, bpm, everySec = 30) {
@@ -16,13 +18,17 @@ function samples(endTs, minutes, bpm, everySec = 30) {
 }
 const workout = (endTs, minutes = 25, bpm = 130) => detectSessions(samples(endTs, minutes, bpm));
 
-test("nightly window is 23:00–05:00 New York", () => {
-  assert.equal(nightly(ny("22:59"), base).active, false);
-  assert.equal(nightly(ny("23:00"), base).active, true);
-  assert.equal(nightly(ny("02:30"), base).active, true);
-  assert.equal(nightly(ny("04:59"), base).active, true);
-  assert.equal(nightly(ny("05:00"), base).active, false);
-  assert.equal(nightly(ny("22:00"), base).secondsUntilStart, 3600);
+test("nightly window is 22:00–06:00 São Paulo, whatever New York's clocks do", () => {
+  assert.equal(nightly(sp("21:59"), base).active, false);
+  assert.equal(nightly(sp("22:00"), base).active, true);
+  assert.equal(nightly(sp("02:30"), base).active, true);
+  assert.equal(nightly(sp("05:59"), base).active, true);
+  assert.equal(nightly(sp("06:00"), base).active, false);
+  assert.equal(nightly(sp("21:00"), base).secondsUntilStart, 3600);
+  // After New York leaves daylight saving time (Nov 1), still 22:00 São Paulo.
+  assert.equal(nightly(sp("21:59", "2026-11-10"), base).active, false);
+  assert.equal(nightly(sp("22:00", "2026-11-10"), base).active, true);
+  assert.equal(nightly(sp("22:00"), base).window, "22:00–06:00 America/Sao_Paulo");
 });
 
 test("satisfactory workout: ≥20 min with ≥5 min above 120 bpm", () => {
@@ -54,7 +60,7 @@ const pick = d => ({ allowed: d.allowed, reason: d.reason });
 test("lease: capped at 15 min, at night start, and at compliance expiry", () => {
   const sessions = workout(ny("09:00"));
   assert.equal(decide({ now: ny("12:00"), sessions }).leaseSeconds, LEASE_MAX_SECONDS);
-  assert.equal(decide({ now: ny("22:55"), sessions }).leaseSeconds, 300);
+  assert.equal(decide({ now: sp("21:55"), sessions }).leaseSeconds, 300);
   const expiring = workout(ny("12:00") - 48 * HOUR + 2 * MIN);
   assert.equal(decide({ now: ny("12:00"), sessions: expiring }).leaseSeconds, 120);
   assert.equal(decide({ now: ny("12:00"), sessions: [] }).leaseSeconds, 0);
@@ -82,9 +88,11 @@ test("policy: stricter is immediate, looser waits 72 h, past baseline refused", 
   assert.equal(effectivePolicy(r.state, t0 + 73 * HOUR).workoutWindowHours, 48);
 
   assert.match(applyChange(null, "workoutWindowHours", 72, t0).error, /baseline/);
-  assert.match(applyChange(null, "nightStartHour", 24, t0).error, /baseline/);   // later start = looser
-  assert.match(applyChange(null, "nightEndHour", 4, t0).error, /baseline/);      // earlier end = looser
-  assert.equal(applyChange(null, "nightStartHour", 22, t0).kind, "stricter");
+  assert.match(applyChange(null, "nightStartHourSP", 23, t0).error, /baseline/);   // later start = looser
+  assert.match(applyChange(null, "nightEndHourSP", 5, t0).error, /baseline/);      // earlier end = looser
+  assert.equal(applyChange(null, "nightStartHourSP", 21, t0).kind, "stricter");
+  assert.match(applyChange(null, "sundayBaseHours", 5, t0).error, /baseline/);
+  assert.equal(applyChange(null, "sundayBaseHours", 3, t0).kind, "stricter");
   assert.match(classifyChange(base, "bogus", 1).error, /unknown/);
 });
 
@@ -118,6 +126,7 @@ test("in-use safeguard: alert after 5 minutes of use while denied, then every 30
 
 test("baseline values are what Randy specified", () => {
   assert.equal(BASELINE.workoutWindowHours.value, 48);
-  assert.equal(BASELINE.nightStartHour.value, 23);
-  assert.equal(BASELINE.nightEndHour.value, 5);
+  assert.equal(BASELINE.nightStartHourSP.value, 22);
+  assert.equal(BASELINE.nightEndHourSP.value, 6);
+  assert.equal(BASELINE.sundayBaseHours.value, 4);
 });

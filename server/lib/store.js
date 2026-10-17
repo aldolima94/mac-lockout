@@ -12,6 +12,7 @@ export const K = {
   phoneLast: P + "phoneLastSeen", events: P + "events",
   passes: P + "passes", escalation: P + "escalation", vacAlarm: P + "vacationAlarm",
   mailFail: P + "mailFailed", lock: P + "lock",
+  brushes: P + "brushes", usage: P + "usage",
 };
 
 let _redis;
@@ -51,9 +52,9 @@ export const newToken = () => randomBytes(18).toString("base64url");
 
 // ── loading everything decide() needs, in one round trip ─────────────────────
 export async function loadState() {
-  const [policyState, sessions, override, last, inUse, macLast, passes, escalation, vacAlarm] =
-    await redis().mget(K.policy, K.sessions, K.override, K.last, K.inUse, K.macLast, K.passes, K.escalation, K.vacAlarm);
-  return { policyState, sessions: sessions || [], override, last, inUse, macLast, passes: passes || [], escalation, vacAlarm };
+  const [policyState, sessions, override, last, inUse, macLast, passes, escalation, vacAlarm, brushes, usage] =
+    await redis().mget(K.policy, K.sessions, K.override, K.last, K.inUse, K.macLast, K.passes, K.escalation, K.vacAlarm, K.brushes, K.usage);
+  return { policyState, sessions: sessions || [], override, last, inUse, macLast, passes: passes || [], escalation, vacAlarm, brushes: brushes || [], usage };
 }
 
 // One writer at a time for the passes list (the scheduler vs. your requests).

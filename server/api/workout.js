@@ -21,14 +21,14 @@ export default async function handler(req, res) {
   const now = Date.now();
 
   const st = await loadState();
-  const before = decide({ now, policyState: st.policyState, sessions: st.sessions, override: st.override, devRecovery: devRecovery(), passes: st.passes });
+  const before = decide({ now, policyState: st.policyState, sessions: st.sessions, override: st.override, devRecovery: devRecovery(), passes: st.passes, brushes: st.brushes, usage: st.usage });
 
   const found = detectSessions(samples);
   const sessions = mergeSessions(st.sessions, found, now);
   await redis().set(K.sessions, sessions);
   await redis().set(K.phoneLast, now);
 
-  const after = decide({ now, policyState: st.policyState, sessions, override: st.override, devRecovery: devRecovery(), passes: st.passes });
+  const after = decide({ now, policyState: st.policyState, sessions, override: st.override, devRecovery: devRecovery(), passes: st.passes, brushes: st.brushes, usage: st.usage });
   await logEvent({
     type: "workout-post", samples: samples.length, sessionsFound: found,
     compliantBefore: before.compliance.compliant, compliantAfter: after.compliance.compliant,
