@@ -4,6 +4,7 @@
 //   ?action=clear-override        end the override now
 //   ?action=reset-workouts        forget all workouts → you're noncompliant (for re-running the test)
 //   ?action=test-email            send a test email to you, and (in Portuguese) to your partner
+//   ?action=forgive-night&day=2026-10-19   give back that night's early-night hour (Sunday bank)
 //
 // override and reset-workouts only work while DEV_RECOVERY=on in Vercel. Remove that
 // variable when development is over and the override stops existing.
@@ -41,7 +42,17 @@ export default async function handler(req, res) {
       const sent = await mailTo(p.email ? "both" : "me", testEmail(p));
       return res.status(200).json({ sent, partner: p.email || "PARTNER_EMAIL not set" });
     }
+    case "forgive-night": {
+      const day = String(req.query.day || req.body?.day || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: "day must be YYYY-MM-DD" });
+      const usage = (await redis().get(K.usage)) || { sundays: {}, lateNights: [] };
+      const was = (usage.lateNights || []).includes(day);
+      usage.lateNights = (usage.lateNights || []).filter(k => k !== day);
+      await redis().set(K.usage, usage);
+      await logEvent({ type: "late-night-forgiven", day, was });
+      return res.status(200).json({ day, forgiven: was, lateNights: usage.lateNights });
+    }
     default:
-      return res.status(400).json({ error: "action must be override | clear-override | reset-workouts | test-email" });
+      return res.status(400).json({ error: "action must be override | clear-override | reset-workouts | test-email | forgive-night" });
   }
 }

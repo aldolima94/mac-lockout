@@ -136,3 +136,20 @@ test("status text is hours and minutes", () => {
   assert.equal(s, "Sunday time today: 2h 50m left\n  used 1h 10m of 4h\n  4h base + 0m brushing + 0m streaks + 0m early nights");
   assert.match(sundayText(bank(sp("2026-10-17 12:00"))), /no limit this Sunday .*starts Sun, Oct 25/);
 });
+
+test("late nights: only real use after 21:00 costs the hour", () => {
+  const late = (hhmm, o = {}) => trackUsage(null, { now: sp(`2026-10-19 ${hhmm}`), userPresent: true, last: null, counting: false, policy, ...o }).lateNights;
+  // Mac asleep, screen off (a dark wake): the daemon reports nobody there.
+  assert.deepEqual(late("21:15", { userPresent: false }), []);
+  // Walked away at 20:55; the screen stays lit until 21:05 → not a late night.
+  assert.deepEqual(late("21:04", { idleSeconds: 9 * 60 }), []);
+  // Touched it at 21:02 → late night.
+  assert.deepEqual(late("21:04", { idleSeconds: 2 * 60 }), ["2026-10-19"]);
+  // Last touched at 21:58, first check-in after that at 22:00 → still a late night.
+  assert.deepEqual(late("22:00", { idleSeconds: 2 * 60 }), ["2026-10-19"]);
+  // Old daemon (no idle time): same as before.
+  assert.deepEqual(late("21:30"), ["2026-10-19"]);
+  // Sunday minutes don't depend on idle time.
+  const u = trackUsage(null, { now: sp("2026-10-25 10:01"), userPresent: true, idleSeconds: 600, last: { at: sp("2026-10-25 10:00"), userPresent: true }, counting: true, policy });
+  assert.equal(u.sundays["2026-10-25"], MIN);
+});

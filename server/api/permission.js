@@ -28,12 +28,13 @@ export default async function handler(req, res) {
 
   if (isMac) {
     const userPresent = req.query.user_present === "1";
+    const idleSeconds = Math.max(0, Number(req.query.idle_seconds) || 0);   // older daemons don't send it → 0
     const mode = req.query.mode === "enforce" ? "enforce" : "dryrun";
     await redis().set(K.macLast, { at: now, userPresent, mode });
 
     // Sunday bank: count time at the screen on a limited Sunday, and note late nights.
     const usage = trackUsage(st.usage, {
-      now, userPresent, last: st.macLast, policy: d.policy,
+      now, userPresent, idleSeconds, last: st.macLast, policy: d.policy,
       counting: d.allowed && d.sunday.limited && d.sunday.isSunday,
     });
     if (JSON.stringify(usage) !== JSON.stringify(st.usage ?? { sundays: {}, lateNights: [] })) {

@@ -45,14 +45,36 @@ console_user() {
   echo "$u"
 }
 
+# Is a screen on (built-in or external)? powerd holds this assertion exactly
+# while a display is on. The few-second "dark wakes" macOS does with the lid
+# closed have every screen off. If pmset can't be read, say on.
+screen_on() {
+  local a
+  a=$(pmset -g assertions 2>/dev/null)
+  case "$a" in *"Assertion status"*) ;; *) return 0 ;; esac
+  case "$a" in *"Prevent sleep while display is on"*) return 0 ;; esac
+  return 1
+}
+
+# Seconds since the last keyboard/trackpad input, so the minutes a screen stays
+# lit after you walk away aren't counted as use. 0 while something is keeping
+# the screen on (a video), and 0 if it can't be read.
+idle_seconds() {
+  local ns
+  pmset -g assertions 2>/dev/null | grep -qE '^ *PreventUserIdleDisplaySleep +[1-9]' && { echo 0; return; }
+  ns=$(ioreg -c IOHIDSystem -d 4 2>/dev/null | awk '/HIDIdleTime/ {print $NF; exit}')
+  if isnum "$ns"; then echo $((ns / 1000000000)); else echo 0; fi
+}
+
 # ---- server ------------------------------------------------------------------
 last_fetch=0; last_http=""
 fetch() {
-  local tmp code present=0
-  [ -n "${1:-}" ] && present=1
+  local tmp code present=0 idle=0
+  # "At the Mac" = logged in at the console with a screen on.
+  if [ -n "${1:-}" ] && screen_on; then present=1; idle=$(idle_seconds); fi
   tmp=$(mktemp "$BASE/.resp.XXXXXX") || return 1
   code=$(curl -s -m 10 -H "Authorization: Bearer $KEY" -o "$tmp" -w '%{http_code}' \
-    "$URL/api/permission?format=text&user_present=$present&mode=$MODE")
+    "$URL/api/permission?format=text&user_present=$present&idle_seconds=$idle&mode=$MODE")
   last_fetch=$(date +%s)
   if [ "$code" = 200 ] && grep -qE '^allowed=(true|false)$' "$tmp"; then
     { grep -E '^[a-z_]+=' "$tmp"; echo "received_at=$last_fetch"; } > "$STATE.tmp"

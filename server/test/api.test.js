@@ -203,3 +203,18 @@ test("a lapsed request doesn't buy time; cancel works from the email page", asyn
   assert.equal(s.body.passes.day.leftThisMonth, 2);
   assert.equal(s.body.passes.day.current, null);
 });
+
+test("admin forgive-night gives back an early-night hour; only the admin key can", async () => {
+  resetMemory();
+  const sp = s => Date.parse(`${s.replace(" ", "T")}:00-03:00`);
+  clock.set(sp("2026-10-19 21:15"));
+  await call("permission", { key: "m", query: { user_present: "1", idle_seconds: "30", mode: "enforce" } });
+  clock.set(sp("2026-10-20 08:00"));
+  const early = async () => (await call("permission", { key: "m", query: { user_present: "0" } })).body.sunday.earlyNights;
+  assert.equal(await early(), 0);
+  assert.equal((await call("admin", { key: "u", query: { action: "forgive-night", day: "2026-10-19" } })).status, 401);
+  assert.equal((await call("admin", { key: "a", query: { action: "forgive-night", day: "yesterday" } })).status, 400);
+  const r = await call("admin", { key: "a", query: { action: "forgive-night", day: "2026-10-19" } });
+  assert.deepEqual([r.status, r.body.forgiven], [200, true]);
+  assert.equal(await early(), 1);
+});

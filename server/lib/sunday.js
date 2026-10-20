@@ -79,8 +79,9 @@ export function sundayBank({ now, policy, workoutEnds = [], brushes = [], usage 
 
 // Called on every Mac check-in. `last` is the previous check-in { at, userPresent }.
 // counting: today is a limited Sunday and the Mac was allowed.
+// idleSeconds: how long since you last touched it (0 if unknown, or a video is on).
 // state: { sundays: { "2026-10-25": ms }, lateNights: ["2026-10-19", …] } → new state
-export function trackUsage(prev, { now, userPresent, last, counting, policy }) {
+export function trackUsage(prev, { now, userPresent, idleSeconds = 0, last, counting, policy }) {
   const today = spDayNumber(now);
   const st = { sundays: { ...(prev?.sundays || {}) }, lateNights: [...(prev?.lateNights || [])] };
 
@@ -92,8 +93,11 @@ export function trackUsage(prev, { now, userPresent, last, counting, policy }) {
     st.sundays[k] = (st.sundays[k] || 0) + (now - last.at);
   }
 
-  // At the Mac in the hour before the lockout → no early-night hour for today.
-  if (userPresent && spClock(now).h === lateHour(policy) && !st.lateNights.includes(dayKey(today))) {
+  // Used the Mac in the hour before the lockout → no early-night hour for that day.
+  // "Used" is when you last touched it, so a screen still lit after you walked away doesn't count.
+  const lastUse = now - Math.max(0, Number(idleSeconds) || 0) * 1000;
+  if (userPresent && spDayNumber(lastUse) === today && spClock(lastUse).h === lateHour(policy) &&
+      !st.lateNights.includes(dayKey(today))) {
     st.lateNights.push(dayKey(today));
   }
 
