@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decide, detectSessions, effectivePolicy, applyChange, satisfactoryEnds, MIN, HOUR } from "../lib/rules.js";
-import { sundayBank, trackUsage, mergeBrushes, sundayText, SUNDAY_BANK_FIRST } from "../lib/sunday.js";
+import { sundayBank, mergeBrushes, sundayText, SUNDAY_BANK_FIRST } from "../lib/sunday.js";
+import { trackUsage } from "../lib/usage.js";
 import { fmtHM } from "../lib/time.js";
 
 // São Paulo wall-clock time → ms (UTC-3 all year).  sp("2026-10-19 08:00")
@@ -80,9 +81,9 @@ test("early nights: Mon–Sat, counted once the lockout starts, not if you were 
 test("usage: counts time at the screen between check-ins; sleep gaps and weekdays don't count", () => {
   const sun = "2026-10-25";
   let u = null, last = null;
-  const at = (hhmm, present, counting = true) => {
+  const at = (hhmm, present, spending = true) => {
     const now = sp(`${sun} ${hhmm}`);
-    u = trackUsage(u, { now, userPresent: present, last, counting, policy });
+    u = trackUsage(u, { now, userPresent: present, last, spending, policy });
     last = { at: now, userPresent: present };
   };
   at("10:00", true); at("10:01", true); at("10:02", true);   // 2 min
@@ -94,10 +95,10 @@ test("usage: counts time at the screen between check-ins; sleep gaps and weekday
   // Weekday: no minutes, but 21:xx at the screen marks a late night.
   u = null; last = null;
   const mon = sp("2026-10-19 21:30");
-  u = trackUsage(u, { now: mon, userPresent: true, last: { at: mon - MIN, userPresent: true }, counting: false, policy });
-  assert.deepEqual(u, { sundays: {}, lateNights: ["2026-10-19"] });
+  u = trackUsage(u, { now: mon, userPresent: true, last: { at: mon - MIN, userPresent: true }, spending: false, policy });
+  assert.deepEqual([u.sundays, u.lateNights], [{}, ["2026-10-19"]]);
   // 20:59 and 22:00 aren't the last hour.
-  assert.deepEqual(trackUsage(null, { now: sp("2026-10-20 20:59"), userPresent: true, last: null, counting: false, policy }).lateNights, []);
+  assert.deepEqual(trackUsage(null, { now: sp("2026-10-20 20:59"), userPresent: true, last: null, spending: false, policy }).lateNights, []);
 });
 
 test("decide: Sunday time runs out → sunday_time_used; night and workouts come first", () => {
@@ -138,7 +139,7 @@ test("status text is hours and minutes", () => {
 });
 
 test("late nights: only real use after 21:00 costs the hour", () => {
-  const late = (hhmm, o = {}) => trackUsage(null, { now: sp(`2026-10-19 ${hhmm}`), userPresent: true, last: null, counting: false, policy, ...o }).lateNights;
+  const late = (hhmm, o = {}) => trackUsage(null, { now: sp(`2026-10-19 ${hhmm}`), userPresent: true, last: null, spending: false, policy, ...o }).lateNights;
   // Mac asleep, screen off (a dark wake): the daemon reports nobody there.
   assert.deepEqual(late("21:15", { userPresent: false }), []);
   // Walked away at 20:55; the screen stays lit until 21:05 → not a late night.
@@ -149,7 +150,9 @@ test("late nights: only real use after 21:00 costs the hour", () => {
   assert.deepEqual(late("22:00", { idleSeconds: 2 * 60 }), ["2026-10-19"]);
   // Old daemon (no idle time): same as before.
   assert.deepEqual(late("21:30"), ["2026-10-19"]);
-  // Sunday minutes don't depend on idle time.
-  const u = trackUsage(null, { now: sp("2026-10-25 10:01"), userPresent: true, idleSeconds: 600, last: { at: sp("2026-10-25 10:00"), userPresent: true }, counting: true, policy });
-  assert.equal(u.sundays["2026-10-25"], MIN);
+  // Sunday minutes: a screen left lit after you walk away isn't use.
+  const sun = (idle, lastIdle = 0) => trackUsage(null, { now: sp("2026-10-25 10:01"), userPresent: true, idleSeconds: idle, last: { at: sp("2026-10-25 10:00"), userPresent: true, idleSeconds: lastIdle }, spending: true, policy }).sundays["2026-10-25"];
+  assert.equal(sun(600), undefined);
+  assert.equal(sun(119), MIN);
+  assert.equal(sun(30, 150), undefined);
 });

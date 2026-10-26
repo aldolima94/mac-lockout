@@ -5,6 +5,7 @@
 import { fmtNY, fmtPT, HOUR } from "./time.js";
 import { CONFIRM_WINDOW_MIN, lapseAt } from "./passes.js";
 import { PARTNER_REPEAT_HOURS } from "./escalation.js";
+import { RULE, minDurationFor } from "./rules.js";
 
 const hours = ms => Math.max(0, Math.floor(ms / HOUR));
 const when = t => (t ? fmtNY(t) : "none on record");
@@ -19,6 +20,8 @@ const motivoPT = r => (r === "nightly_lockout"
   ? "é horário noturno, quando o Mac fica bloqueado sem exceções"
   : r === "sunday_time_used"
   ? "ele já usou todo o tempo de Mac do domingo"
+  : r === "saturday_time_used"
+  ? "ele já usou todo o tempo de Mac do sábado"
   : "ele está sem treino em dia");
 const sign = "\n\n— Mac Lockout (e-mail automático)";
 
@@ -59,11 +62,11 @@ export function notice(n) {
 
 // ── escalation ───────────────────────────────────────────────────────────────
 
-export const warning = ({ since, partnerAt, partnerName, dayLeft, passNeedsWorkoutAfter }) => ({
+export const warning = ({ now, since, partnerAt, partnerName, dayLeft, passNeedsWorkoutAfter }) => ({
   subject: "Mac Lockout: you're out of workout compliance",
   text:
     `Your workout compliance ran out ${when(since)}. The Mac stays locked until you do a qualifying workout ` +
-    `(≥20 min with ≥5 min above 120 bpm)` +
+    `(≥${minDurationFor(now)} min with ≥${RULE.minElevatedMin} min above ${RULE.elevatedBpm} bpm)` +
     (passNeedsWorkoutAfter ? ` (no pass is possible until you've worked out: your last pass started ${fmtNY(passNeedsWorkoutAfter)}).\n\n` : ` or a day pass activates.\n\n`) +
     `If nothing changes, ${partnerName} gets an email ${fmtNY(partnerAt)}, and every ${PARTNER_REPEAT_HOURS} h after that until you're back in compliance.\n` +
     `Day passes left this month: ${dayLeft}. Requesting one holds the emails while it's pending (once per stretch); it doesn't reset the clock.`,

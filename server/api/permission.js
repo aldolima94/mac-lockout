@@ -1,11 +1,11 @@
 // GET /api/permission — "Is Randy permitted to use the MacBook right now?"
 //
 // Key: MAC_KEY (the daemon), or USER_KEY / ADMIN_KEY (a read-only look).
-// Query from the daemon:  user_present=1|0   mode=dryrun|enforce   format=text
+// Query from the daemon:  user_present=1|0   idle_seconds=N   mode=dryrun|enforce   format=text
 // ?now=<ISO time> pretends it's another time (ADMIN_KEY + DEV_RECOVERY=on only; nothing is recorded).
 
 import { decide, trackInUse } from "../lib/rules.js";
-import { trackUsage } from "../lib/sunday.js";
+import { trackUsage } from "../lib/usage.js";
 import { summaryForApi } from "../lib/passes.js";
 import { inUse as inUseMail } from "../lib/messages.js";
 import { iso } from "../lib/time.js";
@@ -30,14 +30,14 @@ export default async function handler(req, res) {
     const userPresent = req.query.user_present === "1";
     const idleSeconds = Math.max(0, Number(req.query.idle_seconds) || 0);   // older daemons don't send it → 0
     const mode = req.query.mode === "enforce" ? "enforce" : "dryrun";
-    await redis().set(K.macLast, { at: now, userPresent, mode });
+    await redis().set(K.macLast, { at: now, userPresent, idleSeconds, mode });
 
-    // Sunday bank: count time at the screen on a limited Sunday, and note late nights.
+    // The banks: count time in use (spent on a limited Saturday or Sunday; earning windows on other days).
     const usage = trackUsage(st.usage, {
       now, userPresent, idleSeconds, last: st.macLast, policy: d.policy,
-      counting: d.allowed && d.sunday.limited && d.sunday.isSunday,
+      spending: d.allowed && ((d.sunday.limited && d.sunday.isSunday) || (d.saturday.limited && d.saturday.isSaturday)),
     });
-    if (JSON.stringify(usage) !== JSON.stringify(st.usage ?? { sundays: {}, lateNights: [] })) {
+    if (JSON.stringify(usage) !== JSON.stringify(st.usage)) {
       await redis().set(K.usage, usage);
       d = decide({ ...inputs, usage });
     }
@@ -110,6 +110,12 @@ function toText(d) {
     ["vacation_start", vac.current?.startAt ?? vac.current?.start],
     ["vacation_ends_at", vac.current?.endsAt],
     ["next_pass_needs_workout_after", d.passes.nextPassNeedsWorkoutAfter],
+    ["saturday", d.saturday.saturday],
+    ["saturday_limited", d.saturday.limited],
+    ["saturday_today", d.saturday.isSaturday],
+    ["saturday_total_minutes", d.saturday.totalMin],
+    ["saturday_used_minutes", d.saturday.usedMin],
+    ["saturday_left_minutes", d.saturday.leftMin],
     ["sunday", d.sunday.sunday],
     ["sunday_limited", d.sunday.limited],
     ["sunday_today", d.sunday.isSunday],

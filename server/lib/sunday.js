@@ -6,24 +6,21 @@
 //   • brushing: each session of ≥ 2 min earns 30 min, at most 2 sessions a day;
 //   • workout streaks: the 2nd day in a row with a qualifying workout earns 1 h,
 //     and each further day in a row another 1 h (counting restarts each Monday);
-//   • early nights: each night Monday–Saturday with nobody at the Mac in the
-//     hour before the nightly lockout (21:00–22:00) earns 1 h.
-// Only time actually logged in on Sunday is spent, whenever it happens. What's
-// left is gone when the week ends. Sundays before SUNDAY_BANK_FIRST have no limit.
+//   • early nights: every minute Monday–Saturday in the hour before the nightly
+//     lockout (21:00–22:00) that you aren't using the Mac earns a minute. Weeks
+//     before EARN_BY_MINUTE_FROM: each night with nobody at the Mac then earned 1 h.
+// Only time actually used on Sunday is spent, whenever it happens (lib/usage.js).
+// What's left is gone when the week ends. Sundays before SUNDAY_BANK_FIRST have no limit.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { MIN, spDayNumber, spClock, spAt, mondayOf, dayKey, dayFromKey, fmtDay, fmtHM } from "./time.js";
+import { MIN, spDayNumber, spAt, mondayOf, dayKey, dayFromKey, fmtDay, fmtHM } from "./time.js";
+import { EARN_BY_MINUTE_FROM, lastHourWindow, offMs } from "./usage.js";
 
 export const SUNDAY_BANK_FIRST = "2026-10-25";      // the first Sunday with a limit
 export const BRUSH = { minMinutes: 2, earnMinutes: 30, perDay: 2 };
 export const STREAK_EARN_MINUTES = 60;
-export const EARLY_NIGHT_EARN_MINUTES = 60;
-// Two Mac check-ins further apart than this: it was asleep in between, so the gap isn't counted.
-export const USAGE_MAX_GAP_SECONDS = 150;
+export const EARLY_NIGHT_EARN_MINUTES = 60;         // weeks before EARN_BY_MINUTE_FROM
 const KEEP_DAYS = 21;
-
-// The hour before the nightly lockout, on day n: "using the Mac late" if you're at it then.
-const lateHour = policy => policy.nightStartHourSP - 1;
 
 // inputs: { now, policy, workoutEnds: [ms], brushes: [{ start, end }], usage }
 export function sundayBank({ now, policy, workoutEnds = [], brushes = [], usage = null }) {
@@ -49,17 +46,24 @@ export function sundayBank({ now, policy, workoutEnds = [], brushes = [], usage 
     if (run >= 2) streakDays++;
   }
 
-  // Early nights: Monday–Saturday nights that are over, with nobody at the Mac in the last hour.
-  const late = new Set(usage?.lateNights || []);
-  let earlyNights = 0;
-  for (let n = monday; n < sunday; n++) {
-    if (now >= spAt(n, policy.nightStartHourSP) && !late.has(dayKey(n))) earlyNights++;
+  // Early nights, Monday–Saturday: the minutes of the last hour you weren't using the Mac.
+  // Older weeks: whole nights that are over, with nobody at the Mac in the last hour.
+  let earlyMs = 0, earlyNights = null;
+  if (monday >= dayFromKey(EARN_BY_MINUTE_FROM)) {
+    for (let n = monday; n < sunday; n++) earlyMs += offMs(lastHourWindow(n, policy), now, usage?.used?.[dayKey(n)]?.lastHour);
+  } else {
+    const late = new Set(usage?.lateNights || []);
+    earlyNights = 0;
+    for (let n = monday; n < sunday; n++) {
+      if (now >= spAt(n, policy.nightStartHourSP) && !late.has(dayKey(n))) earlyNights++;
+    }
+    earlyMs = earlyNights * EARLY_NIGHT_EARN_MINUTES * MIN;
   }
 
   const baseMin = policy.sundayBaseHours * 60;
   const brushMin = brushSessions * BRUSH.earnMinutes;
   const streakMin = streakDays * STREAK_EARN_MINUTES;
-  const earlyMin = earlyNights * EARLY_NIGHT_EARN_MINUTES;
+  const earlyMin = Math.floor(earlyMs / MIN);
   const totalMin = baseMin + brushMin + streakMin + earlyMin;
   const usedMs = usage?.sundays?.[dayKey(sunday)] || 0;
   const isSunday = today === sunday;
@@ -75,36 +79,6 @@ export function sundayBank({ now, policy, workoutEnds = [], brushes = [], usage 
     secondsLeft: limited && isSunday ? Math.floor(leftMs / 1000) : null,
     exhausted: limited && isSunday && leftMs === 0,
   };
-}
-
-// Called on every Mac check-in. `last` is the previous check-in { at, userPresent }.
-// counting: today is a limited Sunday and the Mac was allowed.
-// idleSeconds: how long since you last touched it (0 if unknown, or a video is on).
-// state: { sundays: { "2026-10-25": ms }, lateNights: ["2026-10-19", …] } → new state
-export function trackUsage(prev, { now, userPresent, idleSeconds = 0, last, counting, policy }) {
-  const today = spDayNumber(now);
-  const st = { sundays: { ...(prev?.sundays || {}) }, lateNights: [...(prev?.lateNights || [])] };
-
-  // Sunday minutes: the time since the last check-in, if you were at the screen
-  // both times and the Mac didn't sleep in between.
-  if (counting && userPresent && last?.userPresent && last.at < now &&
-      now - last.at <= USAGE_MAX_GAP_SECONDS * 1000 && spDayNumber(last.at) === today) {
-    const k = dayKey(today);
-    st.sundays[k] = (st.sundays[k] || 0) + (now - last.at);
-  }
-
-  // Used the Mac in the hour before the lockout → no early-night hour for that day.
-  // "Used" is when you last touched it, so a screen still lit after you walked away doesn't count.
-  const lastUse = now - Math.max(0, Number(idleSeconds) || 0) * 1000;
-  if (userPresent && spDayNumber(lastUse) === today && spClock(lastUse).h === lateHour(policy) &&
-      !st.lateNights.includes(dayKey(today))) {
-    st.lateNights.push(dayKey(today));
-  }
-
-  const oldest = dayKey(today - KEEP_DAYS);
-  for (const k of Object.keys(st.sundays)) if (k < oldest) delete st.sundays[k];
-  st.lateNights = st.lateNights.filter(k => k >= oldest);
-  return st;
 }
 
 // The brushing Shortcut re-sends the last few days, so the same session arrives

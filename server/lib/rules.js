@@ -3,19 +3,23 @@
 // Everything the server decides comes out of decide(), given the same inputs.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { MIN, HOUR, DAY, TIMEZONE, SP_TZ, nyClock, spClock, fmtNY, iso } from "./time.js";
+import { MIN, HOUR, DAY, TIMEZONE, SP_TZ, nyClock, spClock, spAt, dayFromKey, fmtNY, iso } from "./time.js";
 import { passSummary } from "./passes.js";
 import { sundayBank } from "./sunday.js";
+import { saturdayBank } from "./saturday.js";
 export { MIN, HOUR, DAY, TIMEZONE, nyClock, fmtNY };
 
-// Workout rule, carried over unchanged from Workout Gate v2.
+// Workout rule, from Workout Gate v2 (which asked for 20 minutes).
 export const RULE = {
   elevatedBpm: 120,   // "elevated" = heart rate above this
-  minDurationMin: 20, // a satisfactory workout lasts at least this long…
+  minDurationMin: 25, // a satisfactory workout lasts at least this long…
   minElevatedMin: 5,  // …with at least this many minutes elevated
   maxGapSec: 90,      // readings closer than this belong to the same session
   minSamples: 10,     // ignore tiny bursts of readings
 };
+// Workouts that started before Nov 1 2026 (midnight São Paulo) needed only 20 minutes.
+export const LONGER_WORKOUTS_FROM = spAt(dayFromKey("2026-11-01"));
+export const minDurationFor = start => (start < LONGER_WORKOUTS_FROM ? 20 : RULE.minDurationMin);
 
 // Baselines. Settings may be made stricter immediately; making them looser
 // (back toward the baseline) waits LOOSEN_DELAY_HOURS; going past the
@@ -98,14 +102,14 @@ export function detectSessions(samples) {
       durationMin: round1(durationMin),
       elevatedMin: round1(elevatedMin),
       maxBpm: x.maxBpm,
-      pass: isSatisfactory({ durationMin, elevatedMin }),
+      pass: isSatisfactory({ start: new Date(x.start).toISOString(), durationMin, elevatedMin }),
     };
   });
 }
 const round1 = x => Math.round(x * 10) / 10;
 
 export const isSatisfactory = s =>
-  s.durationMin >= RULE.minDurationMin && s.elevatedMin >= RULE.minElevatedMin;
+  s.durationMin >= minDurationFor(Date.parse(s.start)) && s.elevatedMin >= RULE.minElevatedMin;
 
 // The phone re-sends overlapping windows, so the same workout arrives more than
 // once. Sessions starting within 2 minutes of each other are the same one; keep
@@ -198,6 +202,7 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
   const workoutEnds = satisfactoryEnds(sessions, now);
   const pass = passSummary(passes || [], { now, policy, workoutEnds });
   const sunday = sundayBank({ now, policy, workoutEnds, brushes, usage });
+  const saturday = saturdayBank({ now, policy, usage });
 
   // Workout rule, overall: a real workout OR a pass covering you.
   const wUntil = workout.compliantUntil ? Date.parse(workout.compliantUntil) : null;
@@ -212,6 +217,7 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
   if (night.active) { allowed = false; reason = "nightly_lockout"; }
   else if (!compliant) { allowed = false; reason = "workout_noncompliance"; }
   else if (sunday.exhausted) { allowed = false; reason = "sunday_time_used"; }
+  else if (saturday.exhausted) { allowed = false; reason = "saturday_time_used"; }
 
   // Development recovery only: honored while DEV_RECOVERY=on on the server.
   const overrideActive = Boolean(devRecovery && override && override.until > now);
@@ -227,6 +233,7 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
       limits.push(night.secondsUntilStart);
       limits.push(Math.floor((untilMs - now) / 1000));
       if (sunday.secondsLeft !== null) limits.push(sunday.secondsLeft);
+      if (saturday.secondsLeft !== null) limits.push(saturday.secondsLeft);
     }
     leaseSeconds = Math.max(0, Math.min(...limits));
   }
@@ -241,6 +248,7 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
     workout,                                               // real workouts only
     passes: pass,                                          // raw (ms) — see summaryForApi
     sunday,                                                // the Sunday bank (lib/sunday.js)
+    saturday,                                              // the Saturday bank (lib/saturday.js)
     policy,
     pendingLoosening: Object.fromEntries(
       Object.entries(policyState?.pending || {}).filter(([, p]) => p.effectiveAt > now)

@@ -1,6 +1,6 @@
 // /api/pass — your passes, from the phone. Key: USER_KEY (or ADMIN_KEY). GET or POST.
 //
-//   (no action)                              passes left, what's pending or scheduled, Sunday time
+//   (no action)                              passes left, what's pending or scheduled, Saturday and Sunday time
 //   ?action=day&reason=sick                  request a day pass (only while out of compliance)
 //   ?action=cancel-day                       cancel the day pass in progress (before it activates)
 //   ?action=vacation&start=2026-12-20        schedule a vacation (midnight New York; or 2026-12-20T08:00 NY time)
@@ -14,6 +14,7 @@ import {
   requestDayPass, cancelDayPass, scheduleVacation, moveVacation, cancelVacation, summaryForApi,
 } from "../lib/passes.js";
 import { sundayText } from "../lib/sunday.js";
+import { saturdayText } from "../lib/saturday.js";
 import { fmtNY, parseStart } from "../lib/time.js";
 import { redis, K, hasKey, deny, readBody, loadState, logEvent, withLock, newId, newToken } from "../lib/store.js";
 
@@ -59,7 +60,7 @@ function reply(res, input, code, r) {
   const d = r.d;
   const body = {
     ok: !r.error, message: r.message ?? null, error: r.error ?? null,
-    ...(d && { allowed: d.allowed, reason: d.reason, compliance: d.compliance, passes: summaryForApi(d.passes), sunday: d.sunday }),
+    ...(d && { allowed: d.allowed, reason: d.reason, compliance: d.compliance, passes: summaryForApi(d.passes), saturday: d.saturday, sunday: d.sunday }),
   };
   if (input.format !== "text") return res.status(code).json(body);
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -86,6 +87,7 @@ export function statusText(d) {
     `can't start: ${v.blockedBy}`;
   out.push(`Vacation: ${vac.leftThisYear} of ${vac.perYear} left this year; ${vText}`);
   if (d.passes.nextPassNeedsWorkoutAfter) out.push(`Next pass needs a workout after ${fmtNY(d.passes.nextPassNeedsWorkoutAfter)}`);
+  out.push(saturdayText(d.saturday));
   out.push(sundayText(d.sunday));
   if (d.nightly.active) out.push(`Nightly lockout is on now (${d.nightly.window}) — passes never cover it`);
   return out.join("\n");
