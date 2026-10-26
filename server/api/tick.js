@@ -59,7 +59,7 @@ export default async function handler(req, res) {
       const p = partner(), since = e.send.since;
       const lastWorkout = d.workout.lastSatisfactoryWorkout ? Date.parse(d.workout.lastSatisfactoryWorkout) : null;
       const m =
-        e.send.kind === "warning" ? warning({ since, partnerAt: partnerFirstAt(since, e.state.warnedAt), partnerName: p.name, dayLeft: d.passes.day.leftThisMonth, passNeedsWorkoutAfter: d.passes.nextPassNeedsWorkoutAfter }) :
+        e.send.kind === "warning" ? warning({ now, since, partnerAt: partnerFirstAt(since, e.state.warnedAt), partnerName: p.name, dayLeft: d.passes.day.leftThisMonth, passNeedsWorkoutAfter: d.passes.nextPassNeedsWorkoutAfter }) :
         e.send.kind === "partner" ? partnerAlert({ since, now, partner: p, lastWorkout, windowHours: d.policy.workoutWindowHours }) :
         backOnTrack({ since, now, via: d.compliance.via, partner: p });
       await logEvent({ type: `escalation-${e.send.kind}`, to: e.send.to, step: e.send.step, since: new Date(since).toISOString() });
