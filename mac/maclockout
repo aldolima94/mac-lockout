@@ -46,6 +46,7 @@ status() {
   passes
   saturday
   sunday
+  weekend
   echo "Nightly lockout:  $([ "$(field night_active)" = true ] && echo ACTIVE || echo off) ($(field night_window))"
   [ "$(field dev_override)" = true ] && echo "DEV OVERRIDE:     on until $(local_time "$(field dev_override_until)")"
   echo
@@ -84,6 +85,17 @@ saturday() {
   elif [ "$(field saturday_today)" = true ]; then
     echo "Saturday time:    $(hm "$(field saturday_left_minutes)") left today (used $(hm "$(field saturday_used_minutes)") of $(hm "$(field saturday_total_minutes)"))"
   else echo "Saturday time:    $(hm "$(field saturday_total_minutes)") banked for Saturday $(field saturday)"; fi
+}
+
+weekend() {
+  [ -n "$(field weekend)" ] || return 0             # older server: no weekend pool
+  if [ "$(field weekend_limited)" != true ]; then return 0
+  elif [ "$(field weekend_now)" = true ]; then
+    echo "Weekend time:     $(hm "$(field weekend_left_minutes)") left (used $(hm "$(field weekend_used_minutes)") of $(hm "$(field weekend_total_minutes)"))"
+  else echo "Weekend time:     $(hm "$(field weekend_total_minutes)") banked for the weekend of $(field weekend)"; fi
+  [ "$(field weekend_brushes)" -ge "$(field weekend_brush_gate)" ] 2>/dev/null ||
+    echo "  brushing        $(field weekend_brushes) of $(field weekend_brush_gate) Mon–Fri: no weekend time until $(field weekend_brush_gate)"
+  return 0
 }
 
 sunday() {
