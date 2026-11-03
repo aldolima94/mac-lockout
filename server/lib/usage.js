@@ -9,9 +9,10 @@
 //
 // Recorded per São Paulo day:
 //   • sundays / saturdays: use on a limited Sunday or Saturday (what the banks spend);
-//   • used.daytime: use between 07:00 and the nightly lockout (the Saturday bank);
-//   • used.lastHour: use in the hour before the nightly lockout (the Sunday bank).
-// The banks turn the rest of those windows into minutes earned for being off the Mac.
+//   • used.daytime: use between 07:00 (08:00 from WEEKEND_POOL_FROM) and the nightly lockout;
+//   • used.lastHour: use in the hour before the nightly lockout (early nights).
+// The banks (lib/weekend.js; before it lib/saturday.js and lib/sunday.js) turn the
+// rest of those windows into minutes earned for being off the Mac.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { spDayNumber, spClock, spAt, weekdayOf, dayKey, dayFromKey } from "./time.js";
@@ -23,6 +24,11 @@ export const IDLE_LIMIT_SECONDS = 120;
 // Two Mac check-ins further apart than this: it was asleep in between, so the gap isn't counted.
 export const USAGE_MAX_GAP_SECONDS = 150;
 export const DAYTIME_FROM_HOUR = 7;
+// Weeks from this Monday earn into one weekend pool (lib/weekend.js), and the
+// daytime window starts at 08:00, when Randy gets up: 07:00–08:00 was a free hour.
+export const WEEKEND_POOL_FROM = "2026-11-09";
+export const POOL_DAYTIME_FROM_HOUR = 8;
+export const daytimeFromHour = n => (n >= dayFromKey(WEEKEND_POOL_FROM) ? POOL_DAYTIME_FROM_HOUR : DAYTIME_FROM_HOUR);
 const KEEP_DAYS = 21;
 
 // A check-in { userPresent, idleSeconds }: is someone using the Mac? Older daemons send no idle time.
@@ -30,7 +36,7 @@ export const isUsing = c => Boolean(c?.userPresent) && (Number(c.idleSeconds) ||
 
 // The earning windows on day n, as [start, end) timestamps.
 const lateHour = policy => policy.nightStartHourSP - 1;
-export const daytimeWindow = (n, policy) => [spAt(n, DAYTIME_FROM_HOUR), spAt(n, policy.nightStartHourSP)];
+export const daytimeWindow = (n, policy) => [spAt(n, daytimeFromHour(n)), spAt(n, policy.nightStartHourSP)];
 export const lastHourWindow = (n, policy) => [spAt(n, lateHour(policy)), spAt(n, policy.nightStartHourSP)];
 
 // ms off the Mac in a window by `now`: the part that has passed, less what was use.
@@ -38,7 +44,7 @@ export const offMs = ([a, b], now, usedMs = 0) => Math.max(0, Math.min(b, now) -
 const overlap = (a, b, [s, e]) => Math.max(0, Math.min(b, e) - Math.max(a, s));
 
 // Called on every Mac check-in. `last` is the previous check-in { at, userPresent, idleSeconds }.
-// spending: today is a limited Saturday or Sunday and the Mac was allowed.
+// spending: today is a limited Saturday or Sunday (or a pool weekend day) and the Mac was allowed.
 // state: { sundays: { day: ms }, saturdays: { day: ms }, used: { day: { daytime, lastHour } }, lateNights: [day] }
 export function trackUsage(prev, { now, userPresent, idleSeconds = 0, last, spending, policy }) {
   const today = spDayNumber(now), k = dayKey(today);

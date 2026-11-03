@@ -74,7 +74,9 @@ test("a week: off the Mac on weekdays earns Saturday, Saturday runs out, Sunday 
   // Saturday 21:00–22:00 off (60m) → 3h 58m. Workouts Mon, Wed, Fri: no streaks.
   clock.set(sp("2026-11-08 09:00"));
   assert.match(await status(), /Sunday time today: 7h 58m left\n  used 0m of 7h 58m\n  4h base \+ 0m brushing \+ 0m streaks \+ 3h 58m early nights/);
-  assert.match(await status(), /Saturday time banked for Sat, Nov 14: 0m/);
+  // The next Saturday belongs to the weekend pool (lib/weekend.js): no Saturday bank for it.
+  assert.doesNotMatch(await status(), /Saturday time/);
+  assert.match(await status(), /Weekend time: one pool for Saturday and Sunday from the week of Mon, Nov 9 \(first weekend Sat, Nov 14\)/);
 
   // The admin gives back Tuesday night: +30m.
   const f = await call("admin", { key: "a", query: { action: "forgive-night", day: "2026-11-03" } });

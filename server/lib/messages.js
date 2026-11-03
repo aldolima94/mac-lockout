@@ -22,6 +22,10 @@ const motivoPT = r => (r === "nightly_lockout"
   ? "ele já usou todo o tempo de Mac do domingo"
   : r === "saturday_time_used"
   ? "ele já usou todo o tempo de Mac do sábado"
+  : r === "weekend_time_used"
+  ? "ele já usou todo o tempo de Mac do fim de semana"
+  : r === "weekend_brushing_short"
+  ? "ele não escovou os dentes 5 vezes de segunda a sexta, então não tem tempo de Mac no fim de semana"
   : "ele está sem treino em dia");
 const sign = "\n\n— Mac Lockout (e-mail automático)";
 

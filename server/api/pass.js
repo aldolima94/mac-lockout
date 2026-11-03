@@ -1,6 +1,6 @@
 // /api/pass — your passes, from the phone. Key: USER_KEY (or ADMIN_KEY). GET or POST.
 //
-//   (no action)                              passes left, what's pending or scheduled, Saturday and Sunday time
+//   (no action)                              passes left, what's pending or scheduled, weekend time
 //   ?action=day&reason=sick                  request a day pass (only while out of compliance)
 //   ?action=cancel-day                       cancel the day pass in progress (before it activates)
 //   ?action=vacation&start=2026-12-20        schedule a vacation (midnight New York; or 2026-12-20T08:00 NY time)
@@ -15,6 +15,7 @@ import {
 } from "../lib/passes.js";
 import { sundayText } from "../lib/sunday.js";
 import { saturdayText } from "../lib/saturday.js";
+import { weekendText } from "../lib/weekend.js";
 import { fmtNY, parseStart } from "../lib/time.js";
 import { redis, K, hasKey, deny, readBody, loadState, logEvent, withLock, newId, newToken } from "../lib/store.js";
 
@@ -31,7 +32,7 @@ export default async function handler(req, res) {
   const run = async () => {
     const st = await loadState();
     const ctx = { now, policy: effectivePolicy(st.policyState, now), workoutEnds: satisfactoryEnds(st.sessions, now) };
-    const d = decide({ now, policyState: st.policyState, sessions: st.sessions, passes: st.passes, brushes: st.brushes, usage: st.usage });
+    const d = decide({ now, policyState: st.policyState, sessions: st.sessions, passes: st.passes, brushes: st.brushes, usage: st.usage, reading: st.reading });
     let r = {};
     switch (action) {
       case "day": r = requestDayPass(st.passes, ctx, { reason: input.reason, compliance: { ...d.compliance, until: Date.parse(d.compliance.until) }, id: newId(), token: newToken() }); break;
@@ -46,7 +47,7 @@ export default async function handler(req, res) {
     } else if (r.error) {
       await logEvent({ type: `pass-${action}-refused`, error: r.error });
     }
-    const after = r.passes ? decide({ now, policyState: st.policyState, sessions: st.sessions, passes: r.passes, brushes: st.brushes, usage: st.usage }) : d;
+    const after = r.passes ? decide({ now, policyState: st.policyState, sessions: st.sessions, passes: r.passes, brushes: st.brushes, usage: st.usage, reading: st.reading }) : d;
     return { ...r, d: after };
   };
 
@@ -60,7 +61,7 @@ function reply(res, input, code, r) {
   const d = r.d;
   const body = {
     ok: !r.error, message: r.message ?? null, error: r.error ?? null,
-    ...(d && { allowed: d.allowed, reason: d.reason, compliance: d.compliance, passes: summaryForApi(d.passes), saturday: d.saturday, sunday: d.sunday }),
+    ...(d && { allowed: d.allowed, reason: d.reason, compliance: d.compliance, passes: summaryForApi(d.passes), weekend: d.weekend, saturday: d.saturday, sunday: d.sunday }),
   };
   if (input.format !== "text") return res.status(code).json(body);
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -87,8 +88,9 @@ export function statusText(d) {
     `can't start: ${v.blockedBy}`;
   out.push(`Vacation: ${vac.leftThisYear} of ${vac.perYear} left this year; ${vText}`);
   if (d.passes.nextPassNeedsWorkoutAfter) out.push(`Next pass needs a workout after ${fmtNY(d.passes.nextPassNeedsWorkoutAfter)}`);
-  out.push(saturdayText(d.saturday));
-  out.push(sundayText(d.sunday));
+  if (d.saturday) out.push(saturdayText(d.saturday));
+  if (d.sunday) out.push(sundayText(d.sunday));
+  out.push(weekendText(d.weekend));
   if (d.nightly.active) out.push(`Nightly lockout is on now (${d.nightly.window}) — passes never cover it`);
   return out.join("\n");
 }
