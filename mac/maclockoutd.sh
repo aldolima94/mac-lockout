@@ -13,6 +13,13 @@
 #
 # Mode (file $BASE/mode): "dryrun" only reports "YOU WOULD BE LOCKED OUT";
 # "enforce" logs you out. Missing/unknown → dryrun.
+#
+# Blocked sites: the server also sends a list of sites that are blocked at all
+# times, in both modes (blocked_sites=…). They're blocked two ways, and both are
+# put back within one tick if edited or deleted:
+#   Chrome      a managed policy (URLBlocklist): the domain and all its
+#               subdomains, in every window, incognito included.
+#   hosts file  the domain and its www point nowhere, for Safari and any other browser.
 
 set -u
 BASE=${MACLOCKOUT_BASE:-/usr/local/maclockout}
@@ -20,6 +27,9 @@ CONF=$BASE/config          # root-only: URL, KEY, HC_URL
 MODEF=$BASE/mode           # dryrun | enforce
 STATE=$BASE/state          # last server answer (world-readable, no secrets)
 LOG=$BASE/maclockout.log
+SITES=$BASE/blocked_sites  # last list of blocked sites from the server
+HOSTS=${MACLOCKOUT_HOSTS:-/etc/hosts}
+CHROME_POLICY=${MACLOCKOUT_CHROME_POLICY:-"/Library/Managed Preferences/com.google.Chrome.plist"}
 
 TICK=${MACLOCKOUT_TICK:-5}             # seconds between checks of the screen
 POLL_SECONDS=${MACLOCKOUT_POLL:-60}    # ask the server this often
@@ -79,6 +89,10 @@ fetch() {
   if [ "$code" = 200 ] && grep -qE '^allowed=(true|false)$' "$tmp"; then
     { grep -E '^[a-z_]+=' "$tmp"; echo "received_at=$last_fetch"; } > "$STATE.tmp"
     chmod 644 "$STATE.tmp"; mv -f "$STATE.tmp" "$STATE"
+    # Older servers don't send the list: keep the last one.
+    if grep -q '^blocked_sites=' "$tmp"; then
+      sed -n 's/^blocked_sites=//p' "$tmp" | head -n 1 > "$SITES.tmp"; chmod 644 "$SITES.tmp"; mv -f "$SITES.tmp" "$SITES"
+    fi
     [ "$last_http" != 200 ] && log "server reachable (http 200)"
   else
     [ "$last_http" != "$code" ] && log "server problem: http ${code:-none} — keeping last answer until its lease runs out"
@@ -104,6 +118,71 @@ evaluate() {
   fi
   case "$REASON" in *[!a-z_]*) REASON=unknown ;; esac
   [ "$ALLOWED" = 0 ] && [ -z "$REASON" ] && REASON=unknown
+  return 0
+}
+
+# ---- blocked sites -----------------------------------------------------------
+H_BEGIN="# >>> maclockout blocked sites (the daemon rewrites this; edits are undone)"
+H_END="# <<< maclockout blocked sites"
+
+# The last list from the server, space-separated; anything that isn't a plain
+# lowercase domain is dropped.
+blocked_sites() {
+  tr -s ' ' '\n' 2>/dev/null < "$SITES" |
+    grep -E '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' |
+    awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ $//'
+}
+
+hosts_block() {   # $1 domains
+  local d h
+  [ -n "$1" ] || return 0
+  echo "$H_BEGIN"
+  for d in $1; do for h in "$d" "www.$d"; do printf '0.0.0.0 %s\n:: %s\n' "$h" "$h"; done; done
+  echo "$H_END"
+}
+
+# Returns 0 if it changed the hosts file.
+apply_hosts() {   # $1 domains
+  local want have tmp
+  want=$(hosts_block "$1")
+  have=$(sed -n '/^# >>> maclockout blocked sites/,/^# <<< maclockout blocked sites/p' "$HOSTS" 2>/dev/null)
+  [ "$want" = "$have" ] && return 1
+  tmp="$HOSTS.maclockout.tmp"
+  { sed '/^# >>> maclockout blocked sites/,/^# <<< maclockout blocked sites/d' "$HOSTS"
+    [ -n "$want" ] && printf '%s\n' "$want"; } > "$tmp" || { rm -f "$tmp"; return 1; }
+  cat "$tmp" > "$HOSTS"; rm -f "$tmp"      # cat keeps the file's owner and mode
+  dscacheutil -flushcache 2>/dev/null; killall -HUP mDNSResponder 2>/dev/null
+  return 0
+}
+
+# Returns 0 if it changed Chrome's policy file.
+apply_chrome() {  # $1 domains
+  local want have d tmp
+  if [ -z "$1" ]; then
+    [ -e "$CHROME_POLICY" ] || return 1
+    rm -f "$CHROME_POLICY"; return 0
+  fi
+  want="["; for d in $1; do want="$want\"$d\","; done; want="${want%,}]"
+  have=$(plutil -extract URLBlocklist json -o - "$CHROME_POLICY" 2>/dev/null)
+  [ "$want" = "$have" ] && return 1
+  mkdir -p "$(dirname "$CHROME_POLICY")"
+  tmp="$CHROME_POLICY.maclockout.tmp"
+  {
+    echo '<?xml version="1.0" encoding="UTF-8"?>'
+    echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+    echo '<plist version="1.0"><dict><key>URLBlocklist</key><array>'
+    for d in $1; do echo "<string>$d</string>"; done
+    echo '</array></dict></plist>'
+  } > "$tmp"
+  chmod 644 "$tmp"; mv -f "$tmp" "$CHROME_POLICY"
+  return 0
+}
+
+apply_blocks() {
+  local sites
+  sites=$(blocked_sites)
+  apply_hosts "$sites" && log "hosts file: blocking ${sites:-nothing}"
+  apply_chrome "$sites" && log "Chrome policy: blocking ${sites:-nothing}"
   return 0
 }
 
@@ -162,6 +241,7 @@ while true; do
      { [ "$ALLOWED" = 0 ] && [ -n "$u" ] && [ "$MODE" = enforce ] && [ $((now - last_fetch)) -ge "$DENY_POLL_SECONDS" ]; }; then
     fetch "$u"; evaluate
   fi
+  apply_blocks
 
   key="$ALLOWED:$REASON:$MODE"
   if [ "$key" != "$prev_key" ]; then

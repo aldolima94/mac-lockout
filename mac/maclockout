@@ -2,7 +2,7 @@
 # maclockout — look at (and, with sudo, steer) the Mac Lockout daemon.
 #
 #   maclockout                    same as status
-#   maclockout status             allowed or not, why, workout compliance, passes (last answer, ≤60 s old)
+#   maclockout status             allowed or not, why, workout compliance, passes, blocked sites (last answer, ≤60 s old)
 #   sudo maclockout check         ask the server right now and print its full answer
 #   maclockout log [n]            last n daemon log lines (default 30)
 #   sudo maclockout mode          show the mode
@@ -12,6 +12,9 @@
 set -u
 BASE=${MACLOCKOUT_BASE:-/usr/local/maclockout}
 STATE=$BASE/state; LOG=$BASE/maclockout.log; MODEF=$BASE/mode; CONF=$BASE/config
+SITES=$BASE/blocked_sites
+HOSTS=${MACLOCKOUT_HOSTS:-/etc/hosts}
+CHROME_POLICY=${MACLOCKOUT_CHROME_POLICY:-"/Library/Managed Preferences/com.google.Chrome.plist"}
 
 field() { sed -n "s/^$1=//p" "$STATE" 2>/dev/null | head -n 1; }
 need_root() { [ "$(id -u)" -eq 0 ] || { echo "run with sudo: sudo maclockout $*"; exit 1; }; }
@@ -48,6 +51,7 @@ status() {
   sunday
   weekend
   echo "Nightly lockout:  $([ "$(field night_active)" = true ] && echo ACTIVE || echo off) ($(field night_window))"
+  blocks
   [ "$(field dev_override)" = true ] && echo "DEV OVERRIDE:     on until $(local_time "$(field dev_override_until)")"
   echo
   echo "Server answer:    ${age}s ago (asks every 60s; an ALLOW is good for ${lease:-0}s)"
@@ -95,6 +99,14 @@ weekend() {
   else echo "Weekend time:     $(hm "$(field weekend_total_minutes)") banked for the weekend of $(field weekend)"; fi
   [ "$(field weekend_brushes)" -ge "$(field weekend_brush_gate)" ] 2>/dev/null ||
     echo "  brushing        $(field weekend_brushes) of $(field weekend_brush_gate) Mon–Fri: no weekend time until $(field weekend_brush_gate)"
+  return 0
+}
+
+blocks() {
+  local s; s=$(cat "$SITES" 2>/dev/null); [ -n "$s" ] || return 0
+  echo "Blocked sites:    $s"
+  grep -q '^# >>> maclockout blocked sites' "$HOSTS" 2>/dev/null || echo "  hosts file      NOT in place (the daemon puts it back within 5 s)"
+  [ -f "$CHROME_POLICY" ] || echo "  Chrome policy   NOT in place (the daemon puts it back within 5 s)"
   return 0
 }
 

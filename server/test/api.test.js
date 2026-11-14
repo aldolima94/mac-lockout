@@ -102,6 +102,7 @@ test("the whole story", async () => {
   assert.match(p, /^compliant_via=day_pass$/m);
   assert.match(p, /^day_pass=active$/m);
   assert.match(p, /^day_passes_left=1$/m);
+  assert.match(p, /^blocked_sites=x\.com twitter\.com ifood\.com\.br .*uber\.com/m);
   assert.deepEqual(mailsSince(i), [`me: Mac Lockout: day pass active until ${new Date(confirmedAt + 30 * MIN + 24 * HOUR).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} NY`]);
 
   // The nightly lockout still applies during the pass.

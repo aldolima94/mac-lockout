@@ -19,6 +19,8 @@ The Mac daemon asks the server every 60 s. While the answer is no, whoever is lo
 
 **Email safeguard.** If the Mac keeps reporting someone logged in while the answer is no, for more than 5 minutes, the server emails you, and again every 30 minutes while it continues.
 
+**Blocked sites.** Some sites are blocked on the Mac all the time, whatever the answer and in both modes: see [Blocked sites](#blocked-sites).
+
 **Stop alarm.** When the daemon is stopped (unloaded, or the Mac shuts down), it sends Healthchecks a "start" signal. The next time the daemon checks in, the server sends "success". If no success arrives within the check's grace time, Healthchecks alerts you. Sleep and a closed lid don't stop the daemon, so they never trigger it. A normal restart comes back in minutes. A shutdown that stays off longer than the grace time does trigger it, except during a vacation pass (see below).
 
 ## Weekend time
@@ -82,6 +84,16 @@ Monday to Friday have no time limit. **Saturdays and Sundays** (São Paulo) are 
 - Rates and the start dates are at the top of `lib/sunday.js`, `lib/saturday.js` and `lib/usage.js`. The 4 h base is the `sundayBaseHours` setting: your partner can lower it at once; raising it back waits 72 h and can't go past 4 h.
 - The admin's `forgive-night` (`/api/admin?key=ADMIN_KEY&action=forgive-night&day=2026-11-03`) gives back that night's early-night time.
 
+## Blocked sites
+
+Blocked all the time: **x.com, twitter.com, ifood.com.br, ifood.com, rappi.com.br, rappi.com, uber.com, ubereats.com** (`BLOCKED_SITES` in `lib/sites.js`). Uber is on the list because iFood orders work inside it.
+
+- **Chrome:** a managed Chrome policy (`URLBlocklist`, in `/Library/Managed Preferences/com.google.Chrome.plist`) blocks each domain and all its subdomains, in normal and incognito windows. Chrome shows its own "blocked" page. `chrome://policy` lists it.
+- **Every other browser:** the hosts file points the domain and its `www.` nowhere. Safari private windows are already off through Screen Time.
+- The server sends the list to the Mac with every answer (`blocked_sites=…`). The daemon keeps the last list it got and puts the policy and the hosts lines back within 5 s if they're edited or deleted. Stopping the daemon doesn't lift them.
+- **Taking a site off** means changing `lib/sites.js` and your partner merging it. Adding one is the same change. There's no setting for it.
+- `maclockout` shows the list, and says so if the policy or the hosts lines are missing.
+
 ## Passes
 
 Passes cover the **workout rule only**. The nightly lockout has no exceptions, ever.
@@ -133,6 +145,7 @@ server/            Vercel project (root directory = server)
   lib/saturday.js    the Saturday bank, until Nov 7 2026 (pure)
   lib/sunday.js      the Sunday bank, until Nov 8 2026 (pure)
   lib/escalation.js  partner escalation + the vacation shutdown-alarm logic (pure, timings at the top)
+  lib/sites.js       the sites blocked on the Mac all the time
   lib/time.js        New York and São Paulo time helpers
   lib/messages.js    email texts (yours in English, your partner's in Portuguese)
   lib/store.js       Redis keys, auth, event log, email
@@ -333,7 +346,7 @@ sudo ./install.sh https://APP.vercel.app MAC_KEY HEALTHCHECK_PING_URL
 It always installs in **dryrun** mode.
 
 ```
-maclockout                  # status: allowed?, reason, compliant until (and via what), last workout, passes, Saturday and Sunday time
+maclockout                  # status: allowed?, reason, compliant until (and via what), last workout, passes, weekend time, blocked sites
 maclockout log              # what the daemon did
 sudo maclockout check       # ask the server right now, full answer
 sudo maclockout mode enforce|dryrun
@@ -418,6 +431,17 @@ To run it again: `/api/admin?key=ADMIN_KEY&action=reset-workouts`.
 - Before it activates, open the same link again and tap **Cancel it**. Status shows `2 of 2 left this month`, and `/api/events` shows `pass-day` → `pass-confirm` → `pass-cancel`.
 - Run the **Vacation** Shortcut with a date at least 2 days out. `maclockout` shows `scheduled …`. Then cancel it: `/api/pass?key=USER_KEY&action=cancel-vacation&format=text`.
 - Do a workout to get back in compliance.
+
+## Shipping the site blocks
+
+Nothing is blocked until both halves are in. No new environment variables.
+
+1. **Merge** into `main` (your partner, on GitHub). Vercel deploys in about a minute, and from then on the server's answer ends with `blocked_sites=x.com twitter.com …`.
+2. **Install** on the Mac: from the `mac` folder, `sudo ./install.sh`. It keeps the URL, keys and mode. Within a minute `maclockout log` shows `hosts file: blocking …` and `Chrome policy: blocking …`.
+3. **Check** in Chrome: `chrome://policy` lists `URLBlocklist`; x.com shows Chrome's "blocked" page in a normal window and in an incognito one. In Safari, x.com doesn't load.
+4. The daemon installed first and the merge later works too: until the server sends the list, nothing is blocked.
+
+**Undo:** remove the sites from `lib/sites.js` and merge. The Mac then deletes the policy and the hosts lines. An empty list removes both.
 
 ## Shipping the weekend pool
 
