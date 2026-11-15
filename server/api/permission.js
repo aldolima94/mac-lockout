@@ -36,8 +36,7 @@ export default async function handler(req, res) {
     // The banks: count time in use (spent on a limited weekend; earning windows on other days).
     const usage = trackUsage(st.usage, {
       now, userPresent, idleSeconds, last: st.macLast, policy: d.policy,
-      spending: d.allowed && ((d.weekend.limited && d.weekend.isWeekend) ||
-        (d.sunday?.limited && d.sunday.isSunday) || (d.saturday?.limited && d.saturday.isSaturday)),
+      spending: d.allowed && d.weekend.limited && d.weekend.isWeekend,
     });
     if (JSON.stringify(usage) !== JSON.stringify(st.usage)) {
       await redis().set(K.usage, usage);
@@ -125,19 +124,6 @@ function toText(d) {
     ["weekend_left_minutes", d.weekend.leftMin],
     ["weekend_brushes", d.weekend.weekdayBrushes],
     ["weekend_brush_gate", d.weekend.brushGate],
-    // The Saturday and Sunday banks: empty from the weekend pool on.
-    ["saturday", d.saturday?.saturday],
-    ["saturday_limited", d.saturday?.limited],
-    ["saturday_today", d.saturday?.isSaturday],
-    ["saturday_total_minutes", d.saturday?.totalMin],
-    ["saturday_used_minutes", d.saturday?.usedMin],
-    ["saturday_left_minutes", d.saturday?.leftMin],
-    ["sunday", d.sunday?.sunday],
-    ["sunday_limited", d.sunday?.limited],
-    ["sunday_today", d.sunday?.isSunday],
-    ["sunday_total_minutes", d.sunday?.totalMin],
-    ["sunday_used_minutes", d.sunday?.usedMin],
-    ["sunday_left_minutes", d.sunday?.leftMin],
     ["dev_override", d.devOverride.active],
     ["dev_override_until", d.devOverride.until],
     // Always blocked on the Mac, whatever the answer above (lib/sites.js).

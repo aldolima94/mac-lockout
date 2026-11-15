@@ -144,6 +144,10 @@ R=$(bash "$ROOT/tools/send-test-workout.sh" "$URL" p weak)
 echo "$R" | grep -q '"pass": false' && ok "weak workout doesn't qualify" || bad "weak workout: $R"
 R=$(bash "$ROOT/tools/send-test-workout.sh" "$URL" p)
 echo "$R" | grep -q '"pass": true' && ok "good workout qualifies" || bad "good workout: $R"
+# Today's brush (the Mac waits for one each day from Nov 16; on a weekend it also earns 30 min).
+S=$(date -u -v-5M +%Y-%m-%dT%H:%M:%SZ); E=$(date -u -v-2M +%Y-%m-%dT%H:%M:%SZ)
+R=$(curl -s -X POST "$URL/api/brush" -H "Authorization: Bearer p" -H "Content-Type: application/json" -d "{\"brushes_csv\":\"$S,$E\"}")
+echo "$R" | grep -q '"longEnough": 1' && ok "today's brush recorded" || bad "brush: $R"
 if [ "$NIGHT" = true ]; then
   echo "  (night in New York — skipping the ALLOW checks)"
 else

@@ -48,8 +48,6 @@ status() {
   echo "  last workout    $(local_time "$(field last_satisfactory_workout)")"
   brushing
   passes
-  saturday
-  sunday
   weekend
   echo "Nightly lockout:  $([ "$(field night_active)" = true ] && echo ACTIVE || echo off) ($(field night_window))"
   blocks
@@ -84,21 +82,13 @@ passes() {
 hm() { local m=${1:-0}; isnum "$m" || m=0; if [ $((m / 60)) -gt 0 ] && [ $((m % 60)) -gt 0 ]; then echo "$((m / 60))h $((m % 60))m"; elif [ $((m / 60)) -gt 0 ]; then echo "$((m / 60))h"; else echo "${m}m"; fi; }
 isnum() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
 
-saturday() {
-  [ -n "$(field saturday)" ] || return 0            # older server: no Saturday bank
-  if [ "$(field saturday_limited)" != true ]; then echo "Saturday time:    no limit this Saturday ($(field saturday))"
-  elif [ "$(field saturday_today)" = true ]; then
-    echo "Saturday time:    $(hm "$(field saturday_left_minutes)") left today (used $(hm "$(field saturday_used_minutes)") of $(hm "$(field saturday_total_minutes)"))"
-  else echo "Saturday time:    $(hm "$(field saturday_total_minutes)") banked for Saturday $(field saturday)"; fi
-}
-
 weekend() {
   [ -n "$(field weekend)" ] || return 0             # older server: no weekend pool
   if [ "$(field weekend_limited)" != true ]; then return 0
   elif [ "$(field weekend_now)" = true ]; then
     echo "Weekend time:     $(hm "$(field weekend_left_minutes)") left (used $(hm "$(field weekend_used_minutes)") of $(hm "$(field weekend_total_minutes)"))"
   else echo "Weekend time:     $(hm "$(field weekend_total_minutes)") banked for the weekend of $(field weekend)"; fi
-  [ "$(field weekend_brushes)" -ge "$(field weekend_brush_gate)" ] 2>/dev/null ||
+  [ "$(field weekend_brush_gate)" = 0 ] || [ "$(field weekend_brushes)" -ge "$(field weekend_brush_gate)" ] 2>/dev/null ||
     echo "  brushing        $(field weekend_brushes) of $(field weekend_brush_gate) Mon–Fri: no weekend time until $(field weekend_brush_gate)"
   return 0
 }
@@ -116,14 +106,6 @@ blocks() {
   grep -q '^# >>> maclockout blocked sites' "$HOSTS" 2>/dev/null || echo "  hosts file      NOT in place (the daemon puts it back within 5 s)"
   [ -f "$CHROME_POLICY" ] || echo "  Chrome policy   NOT in place (the daemon puts it back within 5 s)"
   return 0
-}
-
-sunday() {
-  [ -n "$(field sunday)" ] || return 0              # older server: no Sunday bank
-  if [ "$(field sunday_limited)" != true ]; then echo "Sunday time:      no limit this Sunday ($(field sunday))"
-  elif [ "$(field sunday_today)" = true ]; then
-    echo "Sunday time:      $(hm "$(field sunday_left_minutes)") left today (used $(hm "$(field sunday_used_minutes)") of $(hm "$(field sunday_total_minutes)"))"
-  else echo "Sunday time:      $(hm "$(field sunday_total_minutes)") banked for Sunday $(field sunday)"; fi
 }
 
 case "${1:-status}" in

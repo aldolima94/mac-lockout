@@ -13,8 +13,6 @@ import { decide, effectivePolicy, satisfactoryEnds } from "../lib/rules.js";
 import {
   requestDayPass, cancelDayPass, scheduleVacation, moveVacation, cancelVacation, summaryForApi,
 } from "../lib/passes.js";
-import { sundayText } from "../lib/sunday.js";
-import { saturdayText } from "../lib/saturday.js";
 import { weekendText } from "../lib/weekend.js";
 import { fmtNY, parseStart } from "../lib/time.js";
 import { redis, K, hasKey, deny, readBody, loadState, logEvent, withLock, newId, newToken } from "../lib/store.js";
@@ -61,7 +59,7 @@ function reply(res, input, code, r) {
   const d = r.d;
   const body = {
     ok: !r.error, message: r.message ?? null, error: r.error ?? null,
-    ...(d && { allowed: d.allowed, reason: d.reason, compliance: d.compliance, passes: summaryForApi(d.passes), weekend: d.weekend, saturday: d.saturday, sunday: d.sunday }),
+    ...(d && { allowed: d.allowed, reason: d.reason, compliance: d.compliance, passes: summaryForApi(d.passes), weekend: d.weekend }),
   };
   if (input.format !== "text") return res.status(code).json(body);
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -93,8 +91,6 @@ export function statusText(d) {
     `can't start: ${v.blockedBy}`;
   out.push(`Vacation: ${vac.leftThisYear} of ${vac.perYear} left this year; ${vText}`);
   if (d.passes.nextPassNeedsWorkoutAfter) out.push(`Next pass needs a workout after ${fmtNY(d.passes.nextPassNeedsWorkoutAfter)}`);
-  if (d.saturday) out.push(saturdayText(d.saturday));
-  if (d.sunday) out.push(sundayText(d.sunday));
   out.push(weekendText(d.weekend));
   if (d.nightly.active) out.push(`Nightly lockout is on now (${d.nightly.window}) — passes never cover it`);
   return out.join("\n");

@@ -18,10 +18,6 @@ const viaPT = {
 };
 const motivoPT = r => (r === "nightly_lockout"
   ? "é horário noturno, quando o Mac fica bloqueado sem exceções"
-  : r === "sunday_time_used"
-  ? "ele já usou todo o tempo de Mac do domingo"
-  : r === "saturday_time_used"
-  ? "ele já usou todo o tempo de Mac do sábado"
   : r === "weekend_time_used"
   ? "ele já usou todo o tempo de Mac do fim de semana"
   : r === "not_brushed_today"

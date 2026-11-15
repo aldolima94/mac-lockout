@@ -58,7 +58,7 @@ test("a pool week: 5 brushes, the Mac all week, Saturday runs out, reading earns
   assert.equal(field(r.body, "allowed"), "false");
   assert.equal(field(r.body, "reason"), "weekend_time_used");
   assert.equal(field(r.body, "weekend_used_minutes"), "450");
-  assert.equal(field(r.body, "saturday"), "");        // no Saturday bank any more
+  assert.doesNotMatch(r.body, /^saturday=/m);          // no Saturday bank any more
 
   // 30 minutes in Books: the Mac is allowed again, for 30 minutes.
   assert.match(await read("2026-11-14 16:40", "open"), /Reading: started/);
@@ -73,4 +73,34 @@ test("a pool week: 5 brushes, the Mac all week, Saturday runs out, reading earns
   clock.set(sp("2026-11-14 18:00"));
   assert.equal((await call("read", { key: "p", body: { event: "pause" } })).status, 400);
   assert.equal((await call("read", { key: "m", body: { event: "open" } })).status, 401);
+});
+
+test("a week under the Nov 16 rules: brush to unlock each morning, 10:00–22:00 off the Mac, no gate", async () => {
+  resetMemory();
+  const brushAt = async (s) => {
+    clock.set(sp(s) + 3 * MIN);
+    const start = new Date(sp(s)).toISOString(), end = new Date(sp(s) + 130_000).toISOString();
+    return call("brush", { key: "p", body: { brushes: [{ start, end }], format: "text" } });
+  };
+  await workoutAt("2026-11-15 18:00");                     // Sunday: compliant through Tuesday evening
+  // Monday morning: locked until the brush reaches the server, then allowed.
+  let r = await mac("2026-11-16 07:00");
+  assert.equal(field(r.body, "reason"), "not_brushed_today");
+  assert.equal(field(r.body, "brushed_today"), "false");
+  await brushAt("2026-11-16 07:10");
+  r = await mac("2026-11-16 07:15");
+  assert.equal(field(r.body, "allowed"), "true");
+  assert.equal(field(r.body, "brushed_today"), "true");
+  // At the Mac 07:15–10:00 costs nothing; 10:00–12:00 costs 2 h of the 12 h window.
+  r = await mac("2026-11-16 07:16", "2026-11-16 12:00");
+  clock.set(sp("2026-11-16 23:00"));
+  let s = (await call("pass", { key: "u", query: { format: "text" } })).body;
+  // 10 h off + 30 m brushing; no early nights, no gate line.
+  assert.match(s, /Weekend time banked for the weekend of Sat, Nov 21: 10h 30m \(at most 16h\)\n  10h off the Mac \+ 0m streaks \+ 30m brushing \+ 0m reading/);
+  assert.match(s, /Brushing today: done/);
+  assert.doesNotMatch(s, /needed Mon–Fri|early nights/);
+  // Tuesday: yesterday's brush doesn't unlock today.
+  r = await mac("2026-11-17 08:00");
+  assert.equal(field(r.body, "reason"), "not_brushed_today");
+  assert.equal(field(r.body, "weekend_brush_gate"), "0");
 });

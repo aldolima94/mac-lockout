@@ -11,7 +11,7 @@ The server answers `GET /api/permission`:
 1. 22:00–06:00 São Paulo → `{"allowed": false, "reason": "nightly_lockout"}`
 2. from Mon Nov 16, 2026: no brush yet today (São Paulo) → `{"allowed": false, "reason": "not_brushed_today"}`. See [Brushing every day](#brushing-every-day).
 3. no satisfactory workout in the last 48 h, and no pass covering you → `{"allowed": false, "reason": "workout_noncompliance"}`
-4. a Saturday or Sunday, and the weekend's MacBook time is used up → `{"allowed": false, "reason": "weekend_time_used"}`, or `"weekend_brushing_short"` with fewer than 5 brushes Monday–Friday (until Nov 8, 2026: `"saturday_time_used"` / `"sunday_time_used"`)
+4. a Saturday or Sunday, and the weekend's MacBook time is used up → `{"allowed": false, "reason": "weekend_time_used"}` (the weekend of Nov 14–15, 2026 only: `"weekend_brushing_short"` with fewer than 5 brushes Monday–Friday)
 5. otherwise → `{"allowed": true, "reason": null}`
 
 A satisfactory workout is one session of ≥25 min with ≥5 min above 120 bpm. Workouts that started before Nov 1, 2026 (São Paulo) needed only 20 min, as in Workout Gate v2, and still count for their 48 h (`RULE` and `LONGER_WORKOUTS_FROM` in `lib/rules.js`).
@@ -26,64 +26,25 @@ The Mac daemon asks the server every 60 s. While the answer is no, whoever is lo
 
 ## Weekend time
 
-From the week of **Mon, Nov 9, 2026**, Saturday and Sunday (São Paulo) share **one pool**, earned that week (Monday–Sunday). There's no base: what you don't spend on the Mac during the week is what you get on the weekend, at most **16 h**. Monday to Friday have no limit besides the nightly lockout.
+Saturday and Sunday (São Paulo) share **one pool**, earned that week (Monday–Sunday). There's no base: you start each weekend at 0, at most **16 h** across both days. Monday to Friday have no limit besides the daily brush and the nightly lockout.
 
 | you do | weekend time |
 |---|---|
-| not using the Mac, Monday–Friday 08:00–22:00 | +1 min for every minute |
-| not using the Mac 21:00–22:00 (Monday–Saturday) | +1 min for every minute, on top of the line above |
+| not using the Mac, Monday–Friday 10:00–22:00 | +1 min for every minute |
 | a qualifying workout 2 days in a row | +1 h for the 2nd day, +1 h for each further day in a row |
-| brush your teeth ≥ 2 min (from Apple Health) | +30 min a session, at most 2 a day; all 10 on Monday–Friday: +1 h more |
-| read in Apple Books (iPhone) | +1 min for every minute, any day, the weekend included |
+| brush your teeth ≥ 2 min (from Apple Health) | +30 min a session, at most 2 a day, any day |
+| read in Apple Books (iPhone) | +1 min for every minute, any day |
 
-- **Brushing is required.** Fewer than 5 brushes Monday–Friday (any days, at most 2 a day count) → no weekend time at all, whatever else you earned. 5 brushes earn 2h 30m, 10 earn 6 h. A brush counts once the Brushing Shortcut has sent it, whenever that is.
-- **Brushing and reading on the weekend add to the weekend you're in.** Out of time on Saturday? Read for 20 minutes and the Mac is yours for 20 more (within a minute of closing Books). Weekend brushes earn 30 min each, 2 a day, but don't count toward the 5.
+- **Nothing else earns, and nothing earns twice**, with one exception: reading on a weekday counts on top of being off the Mac. There are no early nights (21:00–22:00 is just part of 10:00–22:00), no brushing minimum and no brushing bonus.
+- **Brushing, streaks and reading on the weekend add to the weekend you're in.** Out of time on Saturday? Read for 20 minutes and the Mac is yours for 20 more (within a minute of closing Books).
+- **Streaks** restart each Monday.
 - **Reading** comes from two Shortcuts, one when Books opens and one when it closes ([4c](#4c-books-shortcuts)). A finished session counts. A session open longer than **3 h** is dropped, as is one that never got its close (`READ_MAX_SESSION_MINUTES` in `lib/weekend.js`).
 - Only use counts, Saturday and Sunday together. You can spend it all on Saturday. When it runs out you're logged out (60 s to save) with reason `weekend_time_used`. What's left is gone when the week ends.
-- The 16 h cap is on what you earn; weekend reading doesn't add past it.
-- The phone status (`/api/pass?format=text`), the Brushing and Books Shortcuts and `maclockout` show it, e.g. `Weekend time banked for the weekend of Sat, Nov 14: 6h 30m (at most 16h)`, with the brushing count and where it came from.
-- Rates and dates are at the top of `lib/weekend.js` (`WEEKEND_POOL_FROM` is in `lib/usage.js`). The `sundayBaseHours` setting no longer does anything.
-
-## Saturday and Sunday time (until Sun, Nov 8, 2026)
-
-Replaced by the weekend pool above. Kept for the week of Nov 2: Saturday Nov 7 and Sunday Nov 8 still run on these rules.
-
-Monday to Friday have no time limit. **Saturdays and Sundays** (São Paulo) are budgets you earn during the week.
-
-**Using the Mac** means logged in with a screen on, and you touched the keyboard or trackpad in the last 2 minutes, or a video is keeping the screen on. Asleep, lid closed, shut down, logged out, or a screen still lit after you walked away: not using it. The Mac checks in once a minute; a minute between two check-ins that both say "using" is a minute of use (`lib/usage.js`). That's what Saturday and Sunday spend, and what costs you minutes on other days.
-
-### Saturday
-
-| you do | Saturday time |
-|---|---|
-| not using the Mac, Monday–Friday 07:00–22:00 | +1 min for every minute, at most **16 h** |
-
-- There's no base. A week at the Mac from 07:00 to 22:00 is a Saturday without it: locked from 06:00.
-- Only use on Saturday is spent. When it runs out you're logged out (60 s to save), with reason `saturday_time_used`. Unused time is gone at the end of the day.
-- 21:00–22:00 counts for both banks: off the Mac then earns Saturday time and Sunday time.
-- It builds up during the week: `Saturday time banked for Sat, Nov 7: 6h 40m`. From Sunday the status shows the coming Saturday.
-- The first limited Saturday is **Nov 7, 2026** (`SATURDAY_BANK_FIRST` in `lib/saturday.js`). Saturdays before it have no limit.
-
-### Sunday
-
-**4 h** of MacBook time, plus what you earned that week (Monday–Sunday):
-
-| you do | Sunday time |
-|---|---|
-| brush your teeth ≥ 2 min (from Apple Health) | +30 min a session, at most 2 a day (+1 h) |
-| a qualifying workout 2 days in a row | +1 h for the 2nd day, +1 h for each further day in a row |
-| not using the Mac 21:00–22:00 (Monday–Saturday) | +1 min for every minute, at most +1 h a night |
-
-- Only use counts, whenever it happens. Opening it at noon with 7 h banked gets you all 7 h (the 22:00 lockout still applies). Closing the lid stops the clock.
-- When it runs out you're logged out like any other lockout (60 s to save), with reason `sunday_time_used`.
-- Streaks count from Monday. Anything earned on Sunday itself (a morning brush, a workout) counts that Sunday.
-- Unused time is gone when the week ends. Every week starts at 4 h.
-- Early nights earn by the minute from the week of **Nov 2, 2026** (`EARN_BY_MINUTE_FROM` in `lib/usage.js`). Before that, a night with nobody at the Mac 21:00–22:00 earned 1 h, and any use then cost the whole hour.
-- The first limited Sunday was **Oct 25, 2026** (`SUNDAY_BANK_FIRST` in `lib/sunday.js`).
-- Example: brushing twice a day, 3 nights off the Mac and 3 nights with 20 minutes on it, no streaks → 4 h + 7 h + 3 h + 2 h = **16 h**.
-- The phone status (`/api/pass?format=text`), the brushing Shortcut and `maclockout` show it, e.g. `Sunday time banked for Sun, Nov 8: 7h 30m`.
-- Rates and the start dates are at the top of `lib/sunday.js`, `lib/saturday.js` and `lib/usage.js`. The 4 h base is the `sundayBaseHours` setting: your partner can lower it at once; raising it back waits 72 h and can't go past 4 h.
-- The admin's `forgive-night` (`/api/admin?key=ADMIN_KEY&action=forgive-night&day=2026-11-03`) gives back that night's early-night time.
+- The 16 h cap is on what you earn; weekend brushing and reading don't add past it.
+- The phone status (`/api/pass?format=text`), the Brushing and Books Shortcuts and `maclockout` show it, e.g. `Weekend time banked for the weekend of Sat, Nov 21: 6h 30m (at most 16h)`, and where it came from.
+- **Using the Mac** means logged in with a screen on, and you touched the keyboard or trackpad in the last 2 minutes, or a video is keeping the screen on. Asleep, lid closed, shut down, logged out, or a screen still lit after you walked away: not using it. The Mac checks in once a minute; a minute between two check-ins that both say "using" is a minute of use (`lib/usage.js`).
+- Rates are at the top of `lib/weekend.js`; the dates are in `lib/usage.js`.
+- **The week of Nov 9, 2026** (the weekend of Nov 14–15) keeps the rules it was earned under: off the Mac from 08:00, 21:00–22:00 earning a second minute (Monday–Saturday), fewer than 5 brushes Monday–Friday = no weekend time, and all 10 = 1 h more. The rules above start with the week of **Mon, Nov 16** (`NEW_RULES_FROM`).
 
 ## Brushing every day
 
@@ -93,7 +54,7 @@ From **Mon, Nov 16, 2026**, the Mac stays locked each day until you've brushed t
 - It counts once the Brushing Shortcut ([4b](#4b-brushing-shortcut)) has sent it. The Mac asks every 60 s, so it unlocks within a minute of the server having it. Before that, the Mac says `not_brushed_today`.
 - Passes don't cover it (they cover the workout rule only). The nightly lockout still comes first.
 - `maclockout` and the phone status show `Brushing today: done (…)` or `NOT yet`.
-- The weekend brushing rules (5 Mon–Fri, 30 min per brush) are unchanged.
+- Each brush also earns 30 weekend minutes (at most 2 a day), as in [Weekend time](#weekend-time).
 
 ## Blocked sites
 
@@ -154,8 +115,6 @@ server/            Vercel project (root directory = server)
   lib/passes.js      day + vacation passes (pure)
   lib/usage.js       time at the Mac: what counts as use, recorded per day (pure)
   lib/weekend.js     the weekend pool: what you earned, what you've used, reading sessions (pure)
-  lib/saturday.js    the Saturday bank, until Nov 7 2026 (pure)
-  lib/sunday.js      the Sunday bank, until Nov 8 2026 (pure)
   lib/escalation.js  partner escalation + the vacation shutdown-alarm logic (pure, timings at the top)
   lib/brushing.js    brushing every day before the Mac unlocks (pure)
   lib/sites.js       the sites blocked on the Mac all the time, and the allowed browsers
@@ -192,7 +151,6 @@ These live in `lib/rules.js`. Only the admin key can change them: `/api/policy?k
 | `workoutWindowHours` | 48 | lower |
 | `nightStartHourSP` (São Paulo) | 22 | earlier |
 | `nightEndHourSP` (São Paulo) | 6 | later |
-| `sundayBaseHours` | 4 | lower |
 | `dayPassesPerMonth` | 2 | lower (0 = off) |
 | `dayPassHours` | 24 | lower |
 | `dayPassAskMinutes` (request → "are you sure?") | 30 | higher |
@@ -302,13 +260,11 @@ The vacation starts at midnight New York time that day (01:00/02:00 in Campinas)
 
 `maclockout status` on the Mac shows the same passes section.
 
-The status (no `action`) ends with your Saturday and Sunday time, e.g.:
+The status (no `action`) ends with your weekend time, e.g.:
 
 ```
-Saturday time banked for Sat, Nov 7: 6h 40m
-  a minute for each minute off the Mac, Mon–Fri 07:00–22:00 (at most 16h)
-Sunday time banked for Sun, Nov 8: 9h 52m
-  4h base + 1h brushing + 2h streaks + 2h 52m early nights
+Weekend time banked for the weekend of Sat, Nov 21: 9h 30m (at most 16h)
+  6h off the Mac + 2h streaks + 1h brushing + 30m reading
 ```
 
 ### 4b. Brushing Shortcut
@@ -329,7 +285,11 @@ Brushing reaches the server from Apple Health. Whatever logs your brushing into 
    - Request Body **JSON**: `brushes_csv` = *Combined Text*, `format` = `text`
 5. **Show Result**.
 
-It answers e.g. `Got 2 brushing sessions (2 of 2+ min).` followed by your weekend time. Re-sending the same days is harmless. Make it run by itself: **Automation → Time of Day**, e.g. 09:00 and 21:30 daily, **Run Immediately**. From Nov 16 the Mac waits for the morning brush, so a run soon after you brush matters: tap the Shortcut, or add earlier automations. A brush only counts once the Shortcut has sent it, so a weekend brush that should unlock time needs a run (tap the Shortcut) before it shows up.
+It answers e.g. `Got 2 brushing sessions (2 of 2+ min).` followed by your weekend time. Re-sending the same days is harmless. Make it run by itself. From Nov 16 the Mac waits for each day's first brush, so it should run soon after you brush:
+
+- **Automation → App → Oral-B → Is Closed**, **Run Immediately**: runs it as you leave the Oral-B app.
+- **Automation → Time of Day**, **Run Immediately**, one automation per time: every 30 minutes through your usual morning (e.g. 06:30, 07:00, 07:30, 08:00, 08:30, 09:00, 09:30, 10:00), plus 21:30 for the night brush.
+- Or tap the Shortcut. The Mac picks the brush up within a minute either way. A brush only counts once the Shortcut has sent it, so a weekend brush that should unlock time needs a run (tap the Shortcut) before it shows up.
 
 Test without a toothbrush: `curl -X POST "https://APP.vercel.app/api/brush?format=text" -H "Authorization: Bearer PHONE_KEY" -H "Content-Type: application/json" -d '{"brushes_csv":"2026-10-19T08:00:00-03:00,2026-10-19T08:02:10-03:00"}'`
 
@@ -445,11 +405,11 @@ To run it again: `/api/admin?key=ADMIN_KEY&action=reset-workouts`.
 - Run the **Vacation** Shortcut with a date at least 2 days out. `maclockout` shows `scheduled …`. Then cancel it: `/api/pass?key=USER_KEY&action=cancel-vacation&format=text`.
 - Do a workout to get back in compliance.
 
-## Shipping the daily brushing rule
+## Shipping the daily brushing rule and the Nov 16 weekend rules
 
 Ships in the same merge as the site blocks. No new environment variables.
 
-1. **Check the date** before merging: `BRUSH_DAILY_FROM` (`lib/brushing.js`) must be a day after the merge. Merging later than Sun Nov 15 → move it.
+1. **Check the dates** before merging: `BRUSH_DAILY_FROM` (`lib/brushing.js`) and `NEW_RULES_FROM` (`lib/usage.js`) must be after the merge, and `NEW_RULES_FROM` a Monday. Merging later than Sun Nov 15 → move both. The weekend of Nov 14–15 keeps its own numbers either way.
 2. From that day, check from the phone: `/api/pass?key=USER_KEY&format=text` shows `Brushing today: NOT yet …` until a brush reaches the server, then `done`.
 3. The brushing line in `maclockout` comes with the Mac install below.
 
@@ -464,35 +424,11 @@ Nothing is blocked until both halves are in. No new environment variables.
 
 **Undo:** remove the sites from `lib/sites.js` and merge. The Mac then deletes the policy and the hosts lines. An empty list removes both.
 
-## Shipping the weekend pool
-
-Nothing changes until this is merged into `main`. No new environment variables.
-
-1. **Check the date** before merging: `WEEKEND_POOL_FROM` (`lib/usage.js`) must be a Monday after the merge. Merging later than Mon Nov 9 → move it to the next Monday first. Until then the Saturday and Sunday banks keep running.
-2. **Merge** into `main` (your partner, on GitHub). Vercel deploys in about a minute.
-3. **Books Shortcuts** on the iPhone ([4c](#4c-books-shortcuts)). Without them reading just earns nothing.
-4. **Check** from the phone: `/api/pass?key=USER_KEY&format=text` shows `Weekend time: one pool for Saturday and Sunday from the week of Mon, Nov 9 …` until then, and `Weekend time banked for the weekend of Sat, Nov 14: …` from Monday.
-5. The weekend lines in `maclockout`: from the `mac` folder, `sudo ./install.sh`, then `maclockout status` to see that the daemon is running again.
-
-**Undo:** Vercel → Deployments → the previous one → **Instant Rollback**. The old code ignores `ml:reading`; the Saturday and Sunday banks pick up from the same usage data.
-
-## Shipping the Saturday bank, minute-by-minute early nights and 25-minute workouts
-
-Nothing changes until this is merged into `main`. No new environment variables and no new Shortcuts. The Mac daemon has to be the one that reports the screen and idle time (`mac/maclockoutd.sh` sends `idle_seconds`); an older daemon still works, but a lit, untouched screen then counts as use.
-
-1. **Check the dates** before merging. The Monday in `EARN_BY_MINUTE_FROM` (`lib/usage.js`) and the Saturday in `SATURDAY_BANK_FIRST` (`lib/saturday.js`) must both be after the merge, since minutes are only recorded from then. Merging later than Mon Nov 2 → move both to the next Monday and Saturday first.
-2. **Merge** into `main` (your partner, on GitHub). Vercel deploys in about a minute.
-3. **Workouts** that start from Nov 1 (São Paulo) need 25 minutes. One that started earlier keeps counting for its 48 h.
-4. **Check** from the phone: `/api/pass?key=USER_KEY&format=text` shows `Saturday time: no limit this Saturday …` until the week of the first limited Saturday, then `Saturday time banked for Sat, Nov 7: …`, growing through the week.
-5. *Optional:* the Saturday line in `maclockout`: from the `mac` folder, `sudo ./install.sh`. It keeps the URL, keys and mode.
-
-**Undo:** Vercel → Deployments → the previous one → **Instant Rollback**. The old code ignores the new data in `ml:usage` (`saturdays`, `used`). Merging a revert later does the same for good.
-
 ## Notes
 
 - Time zones: the nightly lockout and the weekend pool run on São Paulo time, which has no daylight saving time, so 22:00 is always 22:00 in Campinas. Passes, months and your emails still use New York time (`TIMEZONE` in `lib/time.js`).
 - Offline for more than 15 min logs you out (fail closed). Tune with `LEASE_MAX_SECONDS`.
-- Upstash budget: about 2 Redis commands per Mac check (once a minute), plus about 4 per scheduler run (every 5 min), plus one per minute of use (08:00–22:00 and weekends). That's at most ~170k a month against the free tier's 500k.
+- Upstash budget: about 2 Redis commands per Mac check (once a minute), plus about 4 per scheduler run (every 5 min), plus one per minute of use (10:00–22:00 and weekends). That's at most ~170k a month against the free tier's 500k.
 - Vercel Hobby allows 12 functions per deployment. This uses 10 (one per file in `api/`).
 - Everything is free: Vercel Hobby, Upstash free, cron-job.org, Healthchecks Hobbyist (2 of 20 checks), and Gmail.
 - HealthKit on the Mac: macOS still has no Health app or Health data store. A native Mac HealthKit reader would also need a paid developer account. The iPhone Shortcut stays the workout pathway.
