@@ -9,7 +9,7 @@ import { trackUsage } from "../lib/usage.js";
 import { summaryForApi } from "../lib/passes.js";
 import { inUse as inUseMail } from "../lib/messages.js";
 import { iso } from "../lib/time.js";
-import { BLOCKED_SITES } from "../lib/sites.js";
+import { BLOCKED_SITES, ALLOWED_BROWSERS } from "../lib/sites.js";
 import { redis, K, hasKey, deny, loadState, logEvent, mailTo, partner, devRecovery } from "../lib/store.js";
 
 export default async function handler(req, res) {
@@ -138,5 +138,7 @@ function toText(d) {
     ["dev_override_until", d.devOverride.until],
     // Always blocked on the Mac, whatever the answer above (lib/sites.js).
     ["blocked_sites", BLOCKED_SITES.join(" ")],
+    // Any other browser is quit on sight.
+    ["allowed_browsers", ALLOWED_BROWSERS.join(" ")],
   ].map(([k, x]) => `${k}=${v(x)}`).join("\n") + "\n";
 }

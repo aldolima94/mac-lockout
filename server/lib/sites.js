@@ -14,5 +14,17 @@ export const BLOCKED_SITES = [
   "uber.com", "ubereats.com",        // Uber (iFood orders inside it)
 ];
 
+// The only apps that may run on the Mac while registered as a web browser (they
+// open http/https links). The daemon quits any other browser as soon as it
+// starts: one installed later, Tor, Opera's VPN, Chrome Canary. Bundle IDs.
+export const ALLOWED_BROWSERS = [
+  "com.google.Chrome",   // Chrome (the blocks above are a Chrome policy)
+  "com.apple.Safari",    // Safari (hosts file + Screen Time)
+  "com.openai.codex",    // the ChatGPT app, which also registers as a browser
+  "com.anthropic.claudefordesktop", "com.anthropic.claude-code",   // Claude (doesn't register today; kept safe if it ever does)
+];
+
 const DOMAIN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 export const isDomain = d => typeof d === "string" && DOMAIN.test(d);
+const BUNDLE_ID = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+export const isBundleId = b => typeof b === "string" && BUNDLE_ID.test(b);

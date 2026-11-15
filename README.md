@@ -89,7 +89,8 @@ Monday to Friday have no time limit. **Saturdays and Sundays** (São Paulo) are 
 Blocked all the time: **x.com, twitter.com, ifood.com.br, ifood.com, rappi.com.br, rappi.com, uber.com, ubereats.com** (`BLOCKED_SITES` in `lib/sites.js`). Uber is on the list because iFood orders work inside it.
 
 - **Chrome:** a managed Chrome policy (`URLBlocklist`, in `/Library/Managed Preferences/com.google.Chrome.plist`) blocks each domain and all its subdomains, in normal and incognito windows. Chrome shows its own "blocked" page. `chrome://policy` lists it.
-- **Every other browser:** the hosts file points the domain and its `www.` nowhere. Safari private windows are already off through Screen Time.
+- **Safari:** the hosts file points the domain and its `www.` nowhere. Safari private windows are already off through Screen Time.
+- **Every other browser is closed on sight.** Every 5 s the daemon looks at the running apps. Any app that registers for web links (http/https), or is a known browser (Firefox, Tor, Opera, Brave, Edge, Vivaldi, Arc, Chromium, Chrome Canary/Beta/Dev, DuckDuckGo), gets quit, and force-quit 5 s later if it's still open, with a dialog saying why. Allowed: Chrome, Safari, the ChatGPT app (it registers for web links) and Claude (it doesn't today; listed in case it ever does). That list is `ALLOWED_BROWSERS` in `lib/sites.js`, sent as `allowed_browsers=…`, so allowing another browser also needs a merge. Until the Mac has heard the list from the server, it closes nothing.
 - The server sends the list to the Mac with every answer (`blocked_sites=…`). The daemon keeps the last list it got and puts the policy and the hosts lines back within 5 s if they're edited or deleted. Stopping the daemon doesn't lift them.
 - **Taking a site off** means changing `lib/sites.js` and your partner merging it. Adding one is the same change. There's no setting for it.
 - `maclockout` shows the list, and says so if the policy or the hosts lines are missing.
@@ -438,7 +439,7 @@ Nothing is blocked until both halves are in. No new environment variables.
 
 1. **Merge** into `main` (your partner, on GitHub). Vercel deploys in about a minute, and from then on the server's answer ends with `blocked_sites=x.com twitter.com …`.
 2. **Install** on the Mac: from the `mac` folder, `sudo ./install.sh`. It keeps the URL, keys and mode. Within a minute `maclockout log` shows `hosts file: blocking …` and `Chrome policy: blocking …`.
-3. **Check** in Chrome: `chrome://policy` lists `URLBlocklist`; x.com shows Chrome's "blocked" page in a normal window and in an incognito one. In Safari, x.com doesn't load.
+3. **Check** in Chrome: `chrome://policy` lists `URLBlocklist`; x.com shows Chrome's "blocked" page in a normal window and in an incognito one. In Safari, x.com doesn't load. Any other browser you open closes within 5 s (`maclockout log`: `closed …`).
 4. The daemon installed first and the merge later works too: until the server sends the list, nothing is blocked.
 
 **Undo:** remove the sites from `lib/sites.js` and merge. The Mac then deletes the policy and the hosts lines. An empty list removes both.

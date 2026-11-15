@@ -88,6 +88,33 @@ sleep 3; [ "$(grep -c 'blocking' "$BASE/maclockout.log")" = 2 ] && ok "no rewrit
 PATH="$BIN:$PATH" MACLOCKOUT_BASE=$BASE bash "$ROOT/mac/maclockout" status | grep -q "^Blocked sites:    x.com twitter.com" \
   && ok "maclockout status lists the blocked sites" || bad "maclockout status blocked sites"
 
+echo "Other browsers — quit on sight"
+if command -v cc >/dev/null && command -v plutil >/dev/null; then
+  printf '#include <unistd.h>\nint main(void){sleep(120);return 0;}\n' > "$W/s.c"
+  mkapp() {  # name bundle-id registers-for-http(yes/no)
+    local a="$W/apps/$1.app"; mkdir -p "$a/Contents/MacOS"
+    cc -o "$W/exe" "$W/s.c" && mv "$W/exe" "$a/Contents/MacOS/$1"
+    { echo '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>'
+      echo "<key>CFBundleIdentifier</key><string>$2</string>"
+      [ "$3" = yes ] && echo '<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>http</string><string>https</string></array></dict></array>'
+      echo '</dict></plist>'; } > "$a/Contents/Info.plist"
+    "$a/Contents/MacOS/$1" & echo $! > "$W/$1.pid"
+  }
+  newlog
+  mkapp "Fake Browser" test.fakebrowser yes
+  mkapp "Plain Tool" test.plaintool no
+  mkapp "Tor Browser" org.torproject.torbrowser no
+  expect "closed Fake Browser (test.fakebrowser)" "a new browser is closed"
+  expect "closed Tor Browser (org.torproject.torbrowser)" "a known browser is closed even without http links"
+  sleep 2
+  kill -0 "$(cat "$W/Fake Browser.pid")" 2>/dev/null && bad "fake browser still running" || ok "fake browser is gone"
+  kill -0 "$(cat "$W/Plain Tool.pid")" 2>/dev/null && ok "an app that isn't a browser keeps running" || bad "plain app was closed"
+  grep -q "Google Chrome\|Safari" "$BASE/maclockout.log" && bad "an allowed browser was closed" || ok "Chrome and Safari left alone"
+  kill "$(cat "$W/Plain Tool.pid")" 2>/dev/null
+else
+  echo "  (no cc or plutil — skipped)"
+fi
+
 echo "Passes show up in maclockout status"
 R=$(curl -s "$URL/api/pass?key=u&action=day&reason=testing&format=text")
 echo "$R" | grep -q "The pass will unlock in about 1 hour" && ok "day pass requested from the phone endpoint" || bad "day pass request: $R"

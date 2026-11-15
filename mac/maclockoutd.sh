@@ -20,6 +20,9 @@
 #   Chrome      a managed policy (URLBlocklist): the domain and all its
 #               subdomains, in every window, incognito included.
 #   hosts file  the domain and its www point nowhere, for Safari and any other browser.
+# And every other browser is quit on sight: any running app that registers for
+# http/https links, or is a known browser, unless the server lists its bundle ID
+# (allowed_browsers=…). That covers browsers installed later, Tor and VPN browsers.
 
 set -u
 BASE=${MACLOCKOUT_BASE:-/usr/local/maclockout}
@@ -28,6 +31,7 @@ MODEF=$BASE/mode           # dryrun | enforce
 STATE=$BASE/state          # last server answer (world-readable, no secrets)
 LOG=$BASE/maclockout.log
 SITES=$BASE/blocked_sites  # last list of blocked sites from the server
+BROWSERS=$BASE/allowed_browsers  # last list of allowed browsers (bundle IDs) from the server
 HOSTS=${MACLOCKOUT_HOSTS:-/etc/hosts}
 CHROME_POLICY=${MACLOCKOUT_CHROME_POLICY:-"/Library/Managed Preferences/com.google.Chrome.plist"}
 
@@ -92,6 +96,9 @@ fetch() {
     # Older servers don't send the list: keep the last one.
     if grep -q '^blocked_sites=' "$tmp"; then
       sed -n 's/^blocked_sites=//p' "$tmp" | head -n 1 > "$SITES.tmp"; chmod 644 "$SITES.tmp"; mv -f "$SITES.tmp" "$SITES"
+    fi
+    if grep -q '^allowed_browsers=' "$tmp"; then
+      sed -n 's/^allowed_browsers=//p' "$tmp" | head -n 1 > "$BROWSERS.tmp"; chmod 644 "$BROWSERS.tmp"; mv -f "$BROWSERS.tmp" "$BROWSERS"
     fi
     [ "$last_http" != 200 ] && log "server reachable (http 200)"
   else
@@ -186,6 +193,45 @@ apply_blocks() {
   return 0
 }
 
+# ---- other browsers ----------------------------------------------------------
+# Known browsers, in case one doesn't register for http links (bundle ID prefixes).
+KNOWN_BROWSERS="org.torproject. org.mozilla. com.operasoftware. com.brave. com.microsoft.edgemac com.vivaldi. company.thebrowser. org.chromium. com.google.Chrome. com.duckduckgo."
+
+is_browser() {    # $1 bundle path, $2 bundle ID
+  local p
+  plutil -extract CFBundleURLTypes json -o - "$1/Contents/Info.plist" 2>/dev/null | grep -qE '"https?"' && return 0
+  for p in $KNOWN_BROWSERS; do case "$2" in "$p"*) return 0 ;; esac; done
+  return 1
+}
+
+# Running app bundles (the outermost .app of each process), one per line.
+running_apps() { ps -axo comm= | grep '\.app/' | sed 's|\(\.app\)/.*|\1|' | sort -u; }
+
+QUIT_SENT=""      # bundles sent a polite quit on the last tick
+close_other_browsers() {
+  local allowed app id name pids sent="" sig
+  [ -s "$BROWSERS" ] || return 0      # no list from the server yet: leave browsers alone
+  allowed=" $(tr -s ' \n' '  ' < "$BROWSERS") "
+  while IFS= read -r app; do
+    id=$(plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist" 2>/dev/null) || continue
+    case "$allowed" in *" $id "*) continue ;; esac
+    is_browser "$app" "$id" || continue
+    pids=$(ps -axo pid=,comm= | awk -v a="$app/" 'index(substr($0, index($0, $2)), a) == 1 {print $1}')
+    [ -n "$pids" ] || continue
+    name=$(basename "$app" .app | tr -cd 'A-Za-z0-9 ._-')
+    case "$QUIT_SENT" in *"|$app|"*) sig=KILL ;; *) sig=TERM ;; esac
+    kill -"$sig" $pids 2>/dev/null
+    sent="$sent|$app|"
+    if [ "$sig" = TERM ]; then
+      log "closed $name ($id): only the allowed browsers may run"
+      [ -n "${u:-}" ] && tell_user "$u" "Only Chrome and Safari are allowed on this Mac. $name was closed."
+    else
+      log "force-quit $name ($id)"
+    fi
+  done < <(running_apps)
+  QUIT_SENT=$sent
+}
+
 # ---- talking to / removing the person at the screen --------------------------
 tell_user() {   # $1 user, $2 message (our own text only — no quotes in it)
   local uid
@@ -242,6 +288,7 @@ while true; do
     fetch "$u"; evaluate
   fi
   apply_blocks
+  close_other_browsers
 
   key="$ALLOWED:$REASON:$MODE"
   if [ "$key" != "$prev_key" ]; then
