@@ -46,6 +46,7 @@ status() {
   echo "Workout:          $([ "$(field compliant)" = true ] && echo "compliant$via" || echo NOT compliant) (window $(field workout_window_hours) h)"
   echo "  compliant until $(local_time "$(field compliant_until)")"
   echo "  last workout    $(local_time "$(field last_satisfactory_workout)")"
+  brushing
   passes
   saturday
   sunday
@@ -100,6 +101,13 @@ weekend() {
   [ "$(field weekend_brushes)" -ge "$(field weekend_brush_gate)" ] 2>/dev/null ||
     echo "  brushing        $(field weekend_brushes) of $(field weekend_brush_gate) Mon–Fri: no weekend time until $(field weekend_brush_gate)"
   return 0
+}
+
+brushing() {
+  [ -n "$(field brush_daily)" ] || return 0         # older server: no daily brushing rule
+  if [ "$(field brush_daily)" != true ]; then echo "Brushing:         a brush every day unlocks the Mac from $(local_time "$(field brush_daily_from)")"
+  elif [ "$(field brushed_today)" = true ]; then echo "Brushing today:   done ($(local_time "$(field first_brush_today)"))"
+  else echo "Brushing today:   NOT yet: locked until a brush reaches the server (run the Brushing Shortcut)"; fi
 }
 
 blocks() {

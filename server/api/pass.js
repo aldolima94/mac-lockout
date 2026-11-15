@@ -79,6 +79,11 @@ export function statusText(d) {
     cur.status === "requested" ? ` — requested; "are you sure?" email ${fmtNY(cur.askAt)}, lapses ${fmtNY(cur.lapsesAt)}` :
     cur.status === "confirmed" ? ` — confirmed; activates ${fmtNY(cur.activatesAt)}` :
     ` — ACTIVE until ${fmtNY(cur.endsAt)}`;
+  const b = d.brushing;
+  if (b) out.push(!b.active
+    ? `Brushing: the Mac waits for a brush every day from ${fmtNY(Date.parse(b.from))}`
+    : b.brushed ? `Brushing today: done (${fmtNY(Date.parse(b.firstBrushToday))})`
+    : `Brushing today: NOT yet — the Mac stays locked until a brush reaches the server (run the Brushing Shortcut)`);
   out.push(`Day passes: ${day.leftThisMonth} of ${day.perMonth} left this month${curText}`);
   const v = vac.current;
   const vText = !v ? "none scheduled" :

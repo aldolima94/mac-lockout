@@ -8,6 +8,7 @@ import { passSummary } from "./passes.js";
 import { sundayBank } from "./sunday.js";
 import { saturdayBank } from "./saturday.js";
 import { weekendBank, WEEKEND_POOL_FROM } from "./weekend.js";
+import { dailyBrushing } from "./brushing.js";
 export { MIN, HOUR, DAY, TIMEZONE, nyClock, fmtNY };
 
 // Workout rule, from Workout Gate v2 (which asked for 20 minutes).
@@ -202,6 +203,7 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
   const workout = compliance(now, sessions || [], policy.workoutWindowHours);   // real workouts only
   const workoutEnds = satisfactoryEnds(sessions, now);
   const pass = passSummary(passes || [], { now, policy, workoutEnds });
+  const brushing = dailyBrushing(now, brushes);   // brushed today? (lib/brushing.js)
   // From the weekend pool's first week, the Saturday and Sunday banks are gone (null).
   const weekend = weekendBank({ now, policy, workoutEnds, brushes, usage, reading });
   const pool = dayFromKey(WEEKEND_POOL_FROM);
@@ -221,6 +223,7 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
 
   let allowed = true, reason = null;
   if (night.active) { allowed = false; reason = "nightly_lockout"; }
+  else if (!brushing.met) { allowed = false; reason = "not_brushed_today"; }   // passes don't cover it
   else if (!compliant) { allowed = false; reason = "workout_noncompliance"; }
   else if (weekend.exhausted) { allowed = false; reason = weekend.brushGateMet ? "weekend_time_used" : "weekend_brushing_short"; }
   else if (sunday?.exhausted) { allowed = false; reason = "sunday_time_used"; }
@@ -252,6 +255,7 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
     nightly: night,
     compliance: { compliant, until: iso(untilMs), via },   // the workout rule, passes included
     workout,                                               // real workouts only
+    brushing,                                              // the daily brushing rule (lib/brushing.js)
     passes: pass,                                          // raw (ms) — see summaryForApi
     weekend,                                               // the weekend pool (lib/weekend.js)
     sunday,                                                // the Sunday bank (lib/sunday.js), null from the pool

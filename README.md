@@ -9,9 +9,10 @@ workout + brushing data (iPhone Shortcuts) → server decides → root daemon on
 The server answers `GET /api/permission`:
 
 1. 22:00–06:00 São Paulo → `{"allowed": false, "reason": "nightly_lockout"}`
-2. no satisfactory workout in the last 48 h, and no pass covering you → `{"allowed": false, "reason": "workout_noncompliance"}`
-3. a Saturday or Sunday, and the weekend's MacBook time is used up → `{"allowed": false, "reason": "weekend_time_used"}`, or `"weekend_brushing_short"` with fewer than 5 brushes Monday–Friday (until Nov 8, 2026: `"saturday_time_used"` / `"sunday_time_used"`)
-4. otherwise → `{"allowed": true, "reason": null}`
+2. from Mon Nov 16, 2026: no brush yet today (São Paulo) → `{"allowed": false, "reason": "not_brushed_today"}`. See [Brushing every day](#brushing-every-day).
+3. no satisfactory workout in the last 48 h, and no pass covering you → `{"allowed": false, "reason": "workout_noncompliance"}`
+4. a Saturday or Sunday, and the weekend's MacBook time is used up → `{"allowed": false, "reason": "weekend_time_used"}`, or `"weekend_brushing_short"` with fewer than 5 brushes Monday–Friday (until Nov 8, 2026: `"saturday_time_used"` / `"sunday_time_used"`)
+5. otherwise → `{"allowed": true, "reason": null}`
 
 A satisfactory workout is one session of ≥25 min with ≥5 min above 120 bpm. Workouts that started before Nov 1, 2026 (São Paulo) needed only 20 min, as in Workout Gate v2, and still count for their 48 h (`RULE` and `LONGER_WORKOUTS_FROM` in `lib/rules.js`).
 
@@ -84,6 +85,16 @@ Monday to Friday have no time limit. **Saturdays and Sundays** (São Paulo) are 
 - Rates and the start dates are at the top of `lib/sunday.js`, `lib/saturday.js` and `lib/usage.js`. The 4 h base is the `sundayBaseHours` setting: your partner can lower it at once; raising it back waits 72 h and can't go past 4 h.
 - The admin's `forgive-night` (`/api/admin?key=ADMIN_KEY&action=forgive-night&day=2026-11-03`) gives back that night's early-night time.
 
+## Brushing every day
+
+From **Mon, Nov 16, 2026**, the Mac stays locked each day until you've brushed that day (`lib/brushing.js`).
+
+- A brush of 2+ minutes counts for the São Paulo calendar day it **started** in. Last night's brush doesn't unlock the morning; a brush after midnight does count for that day.
+- It counts once the Brushing Shortcut ([4b](#4b-brushing-shortcut)) has sent it. The Mac asks every 60 s, so it unlocks within a minute of the server having it. Before that, the Mac says `not_brushed_today`.
+- Passes don't cover it (they cover the workout rule only). The nightly lockout still comes first.
+- `maclockout` and the phone status show `Brushing today: done (…)` or `NOT yet`.
+- The weekend brushing rules (5 Mon–Fri, 30 min per brush) are unchanged.
+
 ## Blocked sites
 
 Blocked all the time: **x.com, twitter.com, ifood.com.br, ifood.com, rappi.com.br, rappi.com, uber.com, ubereats.com** (`BLOCKED_SITES` in `lib/sites.js`). Uber is on the list because iFood orders work inside it.
@@ -146,7 +157,8 @@ server/            Vercel project (root directory = server)
   lib/saturday.js    the Saturday bank, until Nov 7 2026 (pure)
   lib/sunday.js      the Sunday bank, until Nov 8 2026 (pure)
   lib/escalation.js  partner escalation + the vacation shutdown-alarm logic (pure, timings at the top)
-  lib/sites.js       the sites blocked on the Mac all the time
+  lib/brushing.js    brushing every day before the Mac unlocks (pure)
+  lib/sites.js       the sites blocked on the Mac all the time, and the allowed browsers
   lib/time.js        New York and São Paulo time helpers
   lib/messages.js    email texts (yours in English, your partner's in Portuguese)
   lib/store.js       Redis keys, auth, event log, email
@@ -317,7 +329,7 @@ Brushing reaches the server from Apple Health. Whatever logs your brushing into 
    - Request Body **JSON**: `brushes_csv` = *Combined Text*, `format` = `text`
 5. **Show Result**.
 
-It answers e.g. `Got 2 brushing sessions (2 of 2+ min).` followed by your weekend time. Re-sending the same days is harmless. Make it run by itself: **Automation → Time of Day**, e.g. 09:00 and 21:30 daily, **Run Immediately**. A brush only counts once the Shortcut has sent it, so a weekend brush that should unlock time needs a run (tap the Shortcut) before it shows up.
+It answers e.g. `Got 2 brushing sessions (2 of 2+ min).` followed by your weekend time. Re-sending the same days is harmless. Make it run by itself: **Automation → Time of Day**, e.g. 09:00 and 21:30 daily, **Run Immediately**. From Nov 16 the Mac waits for the morning brush, so a run soon after you brush matters: tap the Shortcut, or add earlier automations. A brush only counts once the Shortcut has sent it, so a weekend brush that should unlock time needs a run (tap the Shortcut) before it shows up.
 
 Test without a toothbrush: `curl -X POST "https://APP.vercel.app/api/brush?format=text" -H "Authorization: Bearer PHONE_KEY" -H "Content-Type: application/json" -d '{"brushes_csv":"2026-10-19T08:00:00-03:00,2026-10-19T08:02:10-03:00"}'`
 
@@ -432,6 +444,14 @@ To run it again: `/api/admin?key=ADMIN_KEY&action=reset-workouts`.
 - Before it activates, open the same link again and tap **Cancel it**. Status shows `2 of 2 left this month`, and `/api/events` shows `pass-day` → `pass-confirm` → `pass-cancel`.
 - Run the **Vacation** Shortcut with a date at least 2 days out. `maclockout` shows `scheduled …`. Then cancel it: `/api/pass?key=USER_KEY&action=cancel-vacation&format=text`.
 - Do a workout to get back in compliance.
+
+## Shipping the daily brushing rule
+
+Ships in the same merge as the site blocks. No new environment variables.
+
+1. **Check the date** before merging: `BRUSH_DAILY_FROM` (`lib/brushing.js`) must be a day after the merge. Merging later than Sun Nov 15 → move it.
+2. From that day, check from the phone: `/api/pass?key=USER_KEY&format=text` shows `Brushing today: NOT yet …` until a brush reaches the server, then `done`.
+3. The brushing line in `maclockout` comes with the Mac install below.
 
 ## Shipping the site blocks
 
