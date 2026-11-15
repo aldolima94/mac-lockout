@@ -91,8 +91,7 @@ test("policy: stricter is immediate, looser waits 72 h, past baseline refused", 
   assert.match(applyChange(null, "nightStartHourSP", 23, t0).error, /baseline/);   // later start = looser
   assert.match(applyChange(null, "nightEndHourSP", 5, t0).error, /baseline/);      // earlier end = looser
   assert.equal(applyChange(null, "nightStartHourSP", 21, t0).kind, "stricter");
-  assert.match(applyChange(null, "sundayBaseHours", 5, t0).error, /baseline/);
-  assert.equal(applyChange(null, "sundayBaseHours", 3, t0).kind, "stricter");
+  assert.match(applyChange(null, "sundayBaseHours", 3, t0).error, /unknown/);   // gone with the Sunday bank
   assert.match(classifyChange(base, "bogus", 1).error, /unknown/);
 });
 
@@ -128,5 +127,4 @@ test("baseline values are what Randy specified", () => {
   assert.equal(BASELINE.workoutWindowHours.value, 48);
   assert.equal(BASELINE.nightStartHourSP.value, 22);
   assert.equal(BASELINE.nightEndHourSP.value, 6);
-  assert.equal(BASELINE.sundayBaseHours.value, 4);
 });

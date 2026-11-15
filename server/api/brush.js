@@ -5,7 +5,7 @@
 // Add ?format=text (or "format": "text" in the body) for a short plain answer with your weekend time.
 
 import { decide } from "../lib/rules.js";
-import { mergeBrushes, sundayText, BRUSH } from "../lib/sunday.js";
+import { mergeBrushes, BRUSH } from "../lib/brushing.js";
 import { weekendText } from "../lib/weekend.js";
 import { redis, K, hasKey, deny, readBody, loadState, logEvent, devRecovery } from "../lib/store.js";
 
@@ -31,12 +31,12 @@ export default async function handler(req, res) {
 
   const d = decide({ now, policyState: st.policyState, sessions: st.sessions, override: st.override, devRecovery: devRecovery(), passes: st.passes, brushes, usage: st.usage, reading: st.reading });
   const counted = found.filter(b => Date.parse(b.end) - Date.parse(b.start) >= BRUSH.minMinutes * 60_000).length;
-  await logEvent({ type: "brush-post", received: found.length, longEnough: counted, weekendTotalMin: d.weekend.totalMin, sundayTotalMin: d.sunday?.totalMin });
+  await logEvent({ type: "brush-post", received: found.length, longEnough: counted, weekendTotalMin: d.weekend.totalMin });
 
   if ((req.query.format || body.format) === "text") {
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     return res.status(200).send(
-      `Got ${found.length} brushing session${found.length === 1 ? "" : "s"} (${counted} of ${BRUSH.minMinutes}+ min).\n\n${d.weekend.limited || !d.sunday ? weekendText(d.weekend) : sundayText(d.sunday)}\n`);
+      `Got ${found.length} brushing session${found.length === 1 ? "" : "s"} (${counted} of ${BRUSH.minMinutes}+ min).\n\n${weekendText(d.weekend)}\n`);
   }
-  return res.status(200).json({ received: found.length, longEnough: counted, stored: brushes.length, weekend: d.weekend, sunday: d.sunday });
+  return res.status(200).json({ received: found.length, longEnough: counted, stored: brushes.length, weekend: d.weekend });
 }

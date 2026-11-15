@@ -1,5 +1,6 @@
-// The weekend pool (from the week of Nov 9 2026): one budget for Saturday and
-// Sunday, no base, at most 16 h, brushing gate, reading minute for minute.
+// The weekend pool's first week (Nov 9 2026), which keeps its own rules: off the
+// Mac from 08:00, early nights, the 5-brush gate and the 10-brush bonus. The rules
+// from Nov 16 are in weekend-new.test.js.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -160,22 +161,20 @@ test("Books sessions: opens and closes", () => {
   assert.match(l.result, /^dropped: open 3h 1m/);
 });
 
-test("decide: the old banks are gone from the pool week; the weekend locks and reading unlocks", () => {
+test("decide: the weekend locks and reading unlocks", () => {
   const sessions = [workout(TUE), workout(THU), workout(SAT)];   // no two days in a row: no streaks
   let usage = allWeekAtTheMac();
   const brushes = onceADay(MON_FRI);                          // 2h 30m
   const at = (s, o = {}) => decide({ now: sp(s), sessions, brushes: o.brushes || brushes, usage: o.usage || usage, reading: o.reading || null });
 
   let d = at(`${WED} 12:00`);
-  assert.equal(d.saturday, null);
-  assert.equal(d.sunday, null);
   assert.equal(d.allowed, true);
+  assert.equal("saturday" in d || "sunday" in d, false);   // the old banks are gone
 
-  // Sunday Nov 8 is still the old Sunday bank; its coming Saturday is the pool's.
+  // Before the pool (Sunday Nov 8) nothing limits the weekend any more.
   const old = decide({ now: sp("2026-11-08 12:00"), sessions: [workout("2026-11-08")] });
-  assert.equal(old.sunday.sunday, "2026-11-08");
-  assert.equal(old.saturday, null);
   assert.equal(old.weekend.limited, false);
+  assert.equal(old.allowed, true);
 
   usage = useMac(usage, `${SAT} 09:00`, `${SAT} 11:30`, true);
   d = at(`${SAT} 11:30`, { usage });

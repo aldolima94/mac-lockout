@@ -13,8 +13,6 @@ import { decide, effectivePolicy, satisfactoryEnds } from "../lib/rules.js";
 import {
   requestDayPass, cancelDayPass, scheduleVacation, moveVacation, cancelVacation, summaryForApi,
 } from "../lib/passes.js";
-import { sundayText } from "../lib/sunday.js";
-import { saturdayText } from "../lib/saturday.js";
 import { weekendText } from "../lib/weekend.js";
 import { fmtNY, parseStart } from "../lib/time.js";
 import { redis, K, hasKey, deny, readBody, loadState, logEvent, withLock, newId, newToken } from "../lib/store.js";
@@ -61,7 +59,7 @@ function reply(res, input, code, r) {
   const d = r.d;
   const body = {
     ok: !r.error, message: r.message ?? null, error: r.error ?? null,
-    ...(d && { allowed: d.allowed, reason: d.reason, compliance: d.compliance, passes: summaryForApi(d.passes), weekend: d.weekend, saturday: d.saturday, sunday: d.sunday }),
+    ...(d && { allowed: d.allowed, reason: d.reason, compliance: d.compliance, passes: summaryForApi(d.passes), weekend: d.weekend }),
   };
   if (input.format !== "text") return res.status(code).json(body);
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -79,6 +77,11 @@ export function statusText(d) {
     cur.status === "requested" ? ` — requested; "are you sure?" email ${fmtNY(cur.askAt)}, lapses ${fmtNY(cur.lapsesAt)}` :
     cur.status === "confirmed" ? ` — confirmed; activates ${fmtNY(cur.activatesAt)}` :
     ` — ACTIVE until ${fmtNY(cur.endsAt)}`;
+  const b = d.brushing;
+  if (b) out.push(!b.active
+    ? `Brushing: the Mac waits for a brush every day from ${fmtNY(Date.parse(b.from))}`
+    : b.brushed ? `Brushing today: done (${fmtNY(Date.parse(b.firstBrushToday))})`
+    : `Brushing today: NOT yet — the Mac stays locked until a brush reaches the server (run the Brushing Shortcut)`);
   out.push(`Day passes: ${day.leftThisMonth} of ${day.perMonth} left this month${curText}`);
   const v = vac.current;
   const vText = !v ? "none scheduled" :
@@ -88,8 +91,6 @@ export function statusText(d) {
     `can't start: ${v.blockedBy}`;
   out.push(`Vacation: ${vac.leftThisYear} of ${vac.perYear} left this year; ${vText}`);
   if (d.passes.nextPassNeedsWorkoutAfter) out.push(`Next pass needs a workout after ${fmtNY(d.passes.nextPassNeedsWorkoutAfter)}`);
-  if (d.saturday) out.push(saturdayText(d.saturday));
-  if (d.sunday) out.push(sundayText(d.sunday));
   out.push(weekendText(d.weekend));
   if (d.nightly.active) out.push(`Nightly lockout is on now (${d.nightly.window}) — passes never cover it`);
   return out.join("\n");

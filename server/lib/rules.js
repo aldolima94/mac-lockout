@@ -5,9 +5,8 @@
 
 import { MIN, HOUR, DAY, TIMEZONE, SP_TZ, nyClock, spClock, spAt, dayFromKey, fmtNY, iso } from "./time.js";
 import { passSummary } from "./passes.js";
-import { sundayBank } from "./sunday.js";
-import { saturdayBank } from "./saturday.js";
-import { weekendBank, WEEKEND_POOL_FROM } from "./weekend.js";
+import { weekendBank } from "./weekend.js";
+import { dailyBrushing } from "./brushing.js";
 export { MIN, HOUR, DAY, TIMEZONE, nyClock, fmtNY };
 
 // Workout rule, from Workout Gate v2 (which asked for 20 minutes).
@@ -29,7 +28,6 @@ export const BASELINE = {
   workoutWindowHours: { value: 48, stricter: "lower", min: 1 },   // max time between workouts
   nightStartHourSP:   { value: 22, stricter: "lower", min: 12 },  // nightly lockout starts (São Paulo)
   nightEndHourSP:     { value: 6,  stricter: "higher", max: 12 }, // nightly lockout ends (São Paulo)
-  sundayBaseHours:    { value: 4,  stricter: "lower", min: 0 },   // Sunday MacBook time before anything earned (lib/sunday.js; unused from the weekend pool)
   // Passes (lib/passes.js). They only ever cover the workout rule.
   dayPassesPerMonth:      { value: 2,  stricter: "lower",  min: 0 },    // per calendar month (NY); 0 = off
   dayPassHours:           { value: 24, stricter: "lower",  min: 1 },    // how long a day pass covers you
@@ -202,13 +200,8 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
   const workout = compliance(now, sessions || [], policy.workoutWindowHours);   // real workouts only
   const workoutEnds = satisfactoryEnds(sessions, now);
   const pass = passSummary(passes || [], { now, policy, workoutEnds });
-  // From the weekend pool's first week, the Saturday and Sunday banks are gone (null).
+  const brushing = dailyBrushing(now, brushes);   // brushed today? (lib/brushing.js)
   const weekend = weekendBank({ now, policy, workoutEnds, brushes, usage, reading });
-  const pool = dayFromKey(WEEKEND_POOL_FROM);
-  let sunday = sundayBank({ now, policy, workoutEnds, brushes, usage });
-  let saturday = saturdayBank({ now, policy, usage });
-  if (sunday.sundayDay > pool) sunday = null;
-  if (saturday.saturdayDay > pool) saturday = null;
 
   // Workout rule, overall: a real workout OR a pass covering you.
   const wUntil = workout.compliantUntil ? Date.parse(workout.compliantUntil) : null;
@@ -221,10 +214,9 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
 
   let allowed = true, reason = null;
   if (night.active) { allowed = false; reason = "nightly_lockout"; }
+  else if (!brushing.met) { allowed = false; reason = "not_brushed_today"; }   // passes don't cover it
   else if (!compliant) { allowed = false; reason = "workout_noncompliance"; }
   else if (weekend.exhausted) { allowed = false; reason = weekend.brushGateMet ? "weekend_time_used" : "weekend_brushing_short"; }
-  else if (sunday?.exhausted) { allowed = false; reason = "sunday_time_used"; }
-  else if (saturday?.exhausted) { allowed = false; reason = "saturday_time_used"; }
 
   // Development recovery only: honored while DEV_RECOVERY=on on the server.
   const overrideActive = Boolean(devRecovery && override && override.until > now);
@@ -239,7 +231,7 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
     else {
       limits.push(night.secondsUntilStart);
       limits.push(Math.floor((untilMs - now) / 1000));
-      for (const b of [weekend, sunday, saturday]) if (b && b.secondsLeft !== null) limits.push(b.secondsLeft);
+      if (weekend.secondsLeft !== null) limits.push(weekend.secondsLeft);
     }
     leaseSeconds = Math.max(0, Math.min(...limits));
   }
@@ -252,10 +244,9 @@ export function decide({ now, policyState, sessions, override, devRecovery, pass
     nightly: night,
     compliance: { compliant, until: iso(untilMs), via },   // the workout rule, passes included
     workout,                                               // real workouts only
+    brushing,                                              // the daily brushing rule (lib/brushing.js)
     passes: pass,                                          // raw (ms) — see summaryForApi
     weekend,                                               // the weekend pool (lib/weekend.js)
-    sunday,                                                // the Sunday bank (lib/sunday.js), null from the pool
-    saturday,                                              // the Saturday bank (lib/saturday.js), null from the pool
     policy,
     pendingLoosening: Object.fromEntries(
       Object.entries(policyState?.pending || {}).filter(([, p]) => p.effectiveAt > now)

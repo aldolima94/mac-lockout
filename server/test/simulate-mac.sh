@@ -9,6 +9,9 @@ W=$(mktemp -d); FAKE=$W/fake; BIN=$W/bin; BASE=$W/maclockout
 mkdir -p "$FAKE" "$BIN" "$BASE"
 PORT=${PORT:-8799}; URL=http://127.0.0.1:$PORT
 echo root > "$FAKE/console"
+# Blocked sites go to stand-ins for /etc/hosts and Chrome's managed policy.
+export MACLOCKOUT_HOSTS=$W/hosts MACLOCKOUT_CHROME_POLICY="$W/Managed Preferences/com.google.Chrome.plist"
+printf '127.0.0.1\tlocalhost\n::1             localhost\n' > "$MACLOCKOUT_HOSTS"
 
 cat > "$BIN/stat" <<EOF
 #!/bin/bash
@@ -28,6 +31,7 @@ case "\$*" in
   "bootout gui/"*) echo root > "$FAKE/console" ;;
 esac
 EOF
+for c in dscacheutil killall; do printf '#!/bin/bash\necho "%s $*" >> "%s/calls"\n' "$c" "$FAKE" > "$BIN/$c"; done
 cat > "$BIN/pkill" <<EOF
 #!/bin/bash
 echo "pkill \$*" >> "$FAKE/calls"; echo root > "$FAKE/console"
@@ -67,6 +71,50 @@ grep -q 'aevtrlgo\|bootout gui' "$FAKE/calls" 2>/dev/null && bad "logout attempt
 PATH="$BIN:$PATH" MACLOCKOUT_BASE=$BASE bash "$ROOT/mac/maclockout" status | grep -q "YOU WOULD BE LOCKED OUT" \
   && ok "maclockout status shows it" || bad "maclockout status"
 
+echo "Blocked sites — hosts file and Chrome policy"
+expect "Chrome policy: blocking x.com twitter.com ifood.com.br" "Chrome policy written"
+grep -q '^0.0.0.0 www.ifood.com.br$' "$MACLOCKOUT_HOSTS" && grep -q '^:: x.com$' "$MACLOCKOUT_HOSTS" \
+  && ok "hosts file blocks the sites and their www" || { bad "hosts file"; cat "$MACLOCKOUT_HOSTS"; }
+grep -q '^127.0.0.1.localhost$' "$MACLOCKOUT_HOSTS" && ok "hosts file keeps its own lines" || bad "hosts file lost localhost"
+[ "$(plutil -extract URLBlocklist.0 raw -o - "$MACLOCKOUT_CHROME_POLICY")" = x.com ] && ok "Chrome URLBlocklist starts with x.com" || bad "Chrome URLBlocklist"
+[ "$(stat -f %Lp "$MACLOCKOUT_CHROME_POLICY")" = 644 ] && ok "Chrome can read the policy (644)" || bad "policy mode"
+grep -q 'killall -HUP mDNSResponder' "$FAKE/calls" && ok "DNS cache flushed" || bad "DNS cache not flushed"
+newlog
+sed -i '' '/x.com/d' "$MACLOCKOUT_HOSTS"; rm -f "$MACLOCKOUT_CHROME_POLICY"
+expect "hosts file: blocking x.com" "hosts edit undone"
+expect "Chrome policy: blocking x.com" "deleted Chrome policy put back"
+sleep 3; [ "$(grep -c 'blocking' "$BASE/maclockout.log")" = 2 ] && ok "no rewrites once in place" || { bad "keeps rewriting"; cat "$BASE/maclockout.log"; }
+[ "$(grep -c '^# >>> maclockout' "$MACLOCKOUT_HOSTS")" = 1 ] && ok "one block in the hosts file" || bad "duplicate hosts block"
+PATH="$BIN:$PATH" MACLOCKOUT_BASE=$BASE bash "$ROOT/mac/maclockout" status | grep -q "^Blocked sites:    x.com twitter.com" \
+  && ok "maclockout status lists the blocked sites" || bad "maclockout status blocked sites"
+
+echo "Other browsers — quit on sight"
+if command -v cc >/dev/null && command -v plutil >/dev/null; then
+  printf '#include <unistd.h>\nint main(void){sleep(120);return 0;}\n' > "$W/s.c"
+  mkapp() {  # name bundle-id registers-for-http(yes/no)
+    local a="$W/apps/$1.app"; mkdir -p "$a/Contents/MacOS"
+    cc -o "$W/exe" "$W/s.c" && mv "$W/exe" "$a/Contents/MacOS/$1"
+    { echo '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>'
+      echo "<key>CFBundleIdentifier</key><string>$2</string>"
+      [ "$3" = yes ] && echo '<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>http</string><string>https</string></array></dict></array>'
+      echo '</dict></plist>'; } > "$a/Contents/Info.plist"
+    "$a/Contents/MacOS/$1" & echo $! > "$W/$1.pid"
+  }
+  newlog
+  mkapp "Fake Browser" test.fakebrowser yes
+  mkapp "Plain Tool" test.plaintool no
+  mkapp "Tor Browser" org.torproject.torbrowser no
+  expect "closed Fake Browser (test.fakebrowser)" "a new browser is closed"
+  expect "closed Tor Browser (org.torproject.torbrowser)" "a known browser is closed even without http links"
+  sleep 2
+  kill -0 "$(cat "$W/Fake Browser.pid")" 2>/dev/null && bad "fake browser still running" || ok "fake browser is gone"
+  kill -0 "$(cat "$W/Plain Tool.pid")" 2>/dev/null && ok "an app that isn't a browser keeps running" || bad "plain app was closed"
+  grep -q "Google Chrome\|Safari" "$BASE/maclockout.log" && bad "an allowed browser was closed" || ok "Chrome and Safari left alone"
+  kill "$(cat "$W/Plain Tool.pid")" 2>/dev/null
+else
+  echo "  (no cc or plutil — skipped)"
+fi
+
 echo "Passes show up in maclockout status"
 R=$(curl -s "$URL/api/pass?key=u&action=day&reason=testing&format=text")
 echo "$R" | grep -q "The pass will unlock in about 1 hour" && ok "day pass requested from the phone endpoint" || bad "day pass request: $R"
@@ -96,6 +144,10 @@ R=$(bash "$ROOT/tools/send-test-workout.sh" "$URL" p weak)
 echo "$R" | grep -q '"pass": false' && ok "weak workout doesn't qualify" || bad "weak workout: $R"
 R=$(bash "$ROOT/tools/send-test-workout.sh" "$URL" p)
 echo "$R" | grep -q '"pass": true' && ok "good workout qualifies" || bad "good workout: $R"
+# Today's brush (the Mac waits for one each day from Nov 16; on a weekend it also earns 30 min).
+S=$(date -u -v-5M +%Y-%m-%dT%H:%M:%SZ); E=$(date -u -v-2M +%Y-%m-%dT%H:%M:%SZ)
+R=$(curl -s -X POST "$URL/api/brush" -H "Authorization: Bearer p" -H "Content-Type: application/json" -d "{\"brushes_csv\":\"$S,$E\"}")
+echo "$R" | grep -q '"longEnough": 1' && ok "today's brush recorded" || bad "brush: $R"
 if [ "$NIGHT" = true ]; then
   echo "  (night in New York — skipping the ALLOW checks)"
 else

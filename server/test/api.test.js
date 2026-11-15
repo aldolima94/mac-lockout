@@ -102,6 +102,8 @@ test("the whole story", async () => {
   assert.match(p, /^compliant_via=day_pass$/m);
   assert.match(p, /^day_pass=active$/m);
   assert.match(p, /^day_passes_left=1$/m);
+  assert.match(p, /^blocked_sites=x\.com twitter\.com ifood\.com\.br .*uber\.com/m);
+  assert.match(p, /^allowed_browsers=com\.google\.Chrome com\.apple\.Safari/m);
   assert.deepEqual(mailsSince(i), [`me: Mac Lockout: day pass active until ${new Date(confirmedAt + 30 * MIN + 24 * HOUR).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} NY`]);
 
   // The nightly lockout still applies during the pass.
@@ -204,17 +206,3 @@ test("a lapsed request doesn't buy time; cancel works from the email page", asyn
   assert.equal(s.body.passes.day.current, null);
 });
 
-test("admin forgive-night gives back an early-night hour; only the admin key can", async () => {
-  resetMemory();
-  const sp = s => Date.parse(`${s.replace(" ", "T")}:00-03:00`);
-  clock.set(sp("2026-10-19 21:15"));
-  await call("permission", { key: "m", query: { user_present: "1", idle_seconds: "30", mode: "enforce" } });
-  clock.set(sp("2026-10-20 08:00"));
-  const early = async () => (await call("permission", { key: "m", query: { user_present: "0" } })).body.sunday.earlyNights;
-  assert.equal(await early(), 0);
-  assert.equal((await call("admin", { key: "u", query: { action: "forgive-night", day: "2026-10-19" } })).status, 401);
-  assert.equal((await call("admin", { key: "a", query: { action: "forgive-night", day: "yesterday" } })).status, 400);
-  const r = await call("admin", { key: "a", query: { action: "forgive-night", day: "2026-10-19" } });
-  assert.deepEqual([r.status, r.body.forgiven], [200, true]);
-  assert.equal(await early(), 1);
-});
